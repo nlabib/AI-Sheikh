@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+# Downloaded sources and everything built from them: large, and some are not ours to redistribute.
+data/raw/
+data/corpus.sqlite*
+data/index/
+data/sft/*.jsonl
+data/eval/results*.json
+outputs/
+results/

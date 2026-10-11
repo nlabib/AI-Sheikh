@@ -1,0 +1,11 @@
+# Default. Qwen3-4B QLoRA on a 12 GB card (RTX 3060 12GB, RTX 4070, RTX 4070 Super).
+# Peak VRAM is an estimate (7-10 GB), not measured here; check yours (training_summary.json -> peak_vram_gb).
+model: Qwen/Qwen3-4B
+max_len: 2048        # longest example in tokens; longer ones are dropped
+batch_size: 1        # examples per forward pass
+grad_accum: 16       # effective batch = batch_size x grad_accum = 16
+epochs: 2
+lr: 2.0e-4
+lora_r: 16
+lora_alpha: 32
+gradient_checkpointing: true

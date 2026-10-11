@@ -1,0 +1,10 @@
+# Larger model on a 24 GB card. Better answers, roughly twice the training time of 4B.
+model: Qwen/Qwen3-8B
+max_len: 2048
+batch_size: 2
+grad_accum: 8
+epochs: 2
+lr: 1.5e-4
+lora_r: 16
+lora_alpha: 32
+gradient_checkpointing: true

@@ -1,0 +1,2 @@
+# Apple Silicon (M1-M4) LoRA training. training/mlx_optional.sh was written against this version's CLI.
+mlx-lm==0.32.0

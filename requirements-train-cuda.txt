@@ -1,0 +1,8 @@
+# NVIDIA QLoRA training. Install the CUDA build of torch first:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu124
+torch>=2.3
+transformers>=4.51   # first release with Qwen3 support
+peft>=0.11
+bitsandbytes>=0.43
+accelerate>=0.30
+pyyaml>=6.0

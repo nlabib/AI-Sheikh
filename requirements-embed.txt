@@ -1,0 +1,3 @@
+# Multilingual semantic search (intfloat/multilingual-e5-*). Pulls in PyTorch.
+# On an NVIDIA machine install the CUDA build of torch first (see docs/TRAINING_GUIDE.md, step 1).
+sentence-transformers>=3.0
