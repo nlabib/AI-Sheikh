@@ -119,7 +119,7 @@ DEFAULTS: dict[str, Any] = {
 def load_config(path: Path | None, overrides: dict[str, Any]) -> dict[str, Any]:
     cfg = dict(DEFAULTS)
     if path:
-        loaded = yaml.safe_load(Path(path).read_text()) or {}
+        loaded = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
         unknown = set(loaded) - set(DEFAULTS)
         if unknown:
             raise ValueError(f"unknown config keys in {path}: {sorted(unknown)}")

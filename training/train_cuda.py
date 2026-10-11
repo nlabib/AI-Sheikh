@@ -15,6 +15,7 @@ and the result is a ~100 MB adapter folder rather than a new 8 GB model.
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import math
 import random
@@ -127,6 +128,10 @@ def main(argv: list[str] | None = None) -> int:
         return {k: torch.tensor(v) for k, v in padded.items()}
 
     out = Path(cfg["out"])
+    # transformers 5 dropped warmup_ratio; there a float warmup_steps below 1 means a ratio of total steps.
+    warmup = ({"warmup_ratio": cfg["warmup_ratio"]}
+              if "warmup_ratio" in inspect.signature(TrainingArguments.__init__).parameters
+              else {"warmup_steps": cfg["warmup_ratio"]})
     training_args = TrainingArguments(
         output_dir=str(out),
         per_device_train_batch_size=cfg["batch_size"],
@@ -136,12 +141,13 @@ def main(argv: list[str] | None = None) -> int:
         max_steps=cfg["max_steps"],
         learning_rate=cfg["lr"],
         lr_scheduler_type="cosine",
-        warmup_ratio=cfg["warmup_ratio"],
+        **warmup,
         logging_steps=cfg["logging_steps"],
         save_steps=cfg["save_steps"],
         save_total_limit=3,
         eval_strategy="steps" if eval_enc else "no",
         eval_steps=cfg["save_steps"] if eval_enc else None,
+        eval_on_start=bool(eval_enc),  # valid loss of the untouched model, to compare against the end
         bf16=bf16,
         fp16=not bf16,
         optim="paged_adamw_8bit",
@@ -154,6 +160,8 @@ def main(argv: list[str] | None = None) -> int:
                       eval_dataset=eval_enc or None, data_collator=collate)
     t0 = time.time()
     trainer.train()
+    if eval_enc:  # short runs never reach eval_steps, so always measure valid loss once at the end
+        trainer.evaluate()
     model.save_pretrained(out / "adapter")
     tokenizer.save_pretrained(out / "adapter")
     summary = {"config": cfg, "minutes": round((time.time() - t0) / 60, 1),

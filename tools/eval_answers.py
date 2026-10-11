@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps({"model": settings.lm_model, "summary": dict(status), "rows": rows},
-                                       ensure_ascii=False, indent=2))
+                                       ensure_ascii=False, indent=2), encoding="utf-8")
     return 0
 
 if __name__ == "__main__":
