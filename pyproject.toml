@@ -1,0 +1,9 @@
+[project]
+name = "islamic-qwen-ai"
+version = "0.2.0"
+description = "Local, citation-checked Islamic Q&A: Qwen3 + multilingual retrieval over the Quran and hadith"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

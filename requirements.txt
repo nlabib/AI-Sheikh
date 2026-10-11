@@ -1,0 +1,7 @@
+# Core: API server, corpus, keyword retrieval, evaluation, citation checks.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+httpx>=0.27
+numpy>=1.26
+pydantic>=2.6
+pyyaml>=6.0
