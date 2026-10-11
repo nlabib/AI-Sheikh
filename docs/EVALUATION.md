@@ -19,9 +19,12 @@ corpus and scoped. Current numbers: `docs/RESULTS.md`. Answer quality can't exce
 | text in quotation marks appears in the cited passage (normalised; ≥90% match for long quotes) | fail (`misquote`) |
 | each substantive sentence carries a marker | warn (`uncited_claim`) |
 | cited sentence shares vocabulary with its source, unless it carries a verified quote | warn (`weak_support`) |
-| answer cites nothing and doesn't decline | warn (`no_citations`) |
+| answer makes substantive claims and cites nothing | fail (`unsupported_answer`) |
+| answer cites nothing (short reply, no claims) | warn (`no_citations`) |
 
-Declining ("the sources don't cover this; ask a qualified scholar") passes.
+A pure refusal ("I'm not sure; the sources don't cover this; ask a qualified scholar") passes.
+"I'm not sure" followed by claims is not a refusal: it fails as `unsupported_answer`. With
+`STRICT_CITATIONS` on (the default), any failing answer is replaced with "I'm not sure".
 
 **What this does not establish:** that the answer's reading of the source is correct. A sentence
 can cite the right verse and still misstate what it means. Closing that gap needs:
