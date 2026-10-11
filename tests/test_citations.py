@@ -63,3 +63,12 @@ def test_malformed_marker_flagged(store):
 def test_quoted_sentence_with_period_inside_is_not_split(store):
     answer = '"Allah! There is no deity save Him, the Alive, the Eternal. Neither slumber nor sleep overtaketh Him." [quran:2:255]'
     assert check_answer(answer, EVIDENCE, store).status == "pass"
+
+
+def test_not_sure_answers_pass_and_are_detected(store):
+    from app.citations import says_not_sure
+
+    for text in ["I'm not sure. The sources do not cover this.", "আমি নিশ্চিত নই।", "لست متأكدًا."]:
+        assert check_answer(text, EVIDENCE, store).status == "pass"
+        assert says_not_sure(text)
+    assert not says_not_sure("There is no compulsion in religion [quran:2:256].")

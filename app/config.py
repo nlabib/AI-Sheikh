@@ -27,6 +27,8 @@ class Settings:
     lm_api_key: str = field(default_factory=lambda: _env("LM_API_KEY", "lm-studio"))
     lm_timeout: float = field(default_factory=lambda: float(_env("LM_TIMEOUT", "120")))
     top_k: int = field(default_factory=lambda: int(_env("TOP_K", "6")))
+    # When an answer fails the citation check, replace it with "I'm not sure" (raw answer kept separately).
+    strict_citations: bool = field(default_factory=lambda: _env("STRICT_CITATIONS", "1") != "0")
 
     @property
     def raw_dir(self) -> Path:

@@ -25,7 +25,7 @@ _QUOTE = re.compile(r"[\"“«]([^\"”»]{12,}?)[\"”»]")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?।؟])\s+|\n+")
 # Sentences like these do not need a source.
 _EXEMPT = re.compile(
-    r"(allah knows best|(?:ask|consult)\w* (?:with )?(?:a |an |your )?(?:qualified |local |trusted )?"
+    r"(i'?m not sure|i am not sure|আমি নিশ্চিত নই|لست متأكد|allah knows best|(?:ask|consult)\w* (?:with )?(?:a |an |your )?(?:qualified |local |trusted )?"
     r"(?:scholar|imam|mufti)|not (?:found|covered)|do not (?:have|address|cover)|don't have|"
     r"cannot (?:find|answer)|আল্লাহই ভালো জানেন|আলেমকে|আলেমের|উত্তর নেই|পারছি না|"
     r"والله أعلم|لا تتناول|لا أستطيع|سؤال عالم|عالم مختص)",
@@ -54,6 +54,13 @@ class CitationReport:
 
 
 FAIL_KINDS = {"nonexistent_reference", "uncited_evidence", "misquote"}
+
+
+_NOT_SURE = re.compile(r"(i'?m not sure|i am not sure|আমি নিশ্চিত নই|لست متأكد)", re.I)
+
+
+def says_not_sure(answer: str) -> bool:
+    return bool(_NOT_SURE.search(answer))
 
 
 def _sentences(answer: str) -> list[str]:

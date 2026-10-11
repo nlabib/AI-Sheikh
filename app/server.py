@@ -17,9 +17,10 @@ from app.citations import check_answer
 from app.config import get_settings
 from app.embed import VectorIndex, make_embedder
 from app.llm import ChatClient, LLMError
-from app.prompts import build_messages
+from app.prompts import NOT_SURE, build_messages
 from app.retrieve import Retriever
 from app.store import Store
+from app.text import detect_lang
 
 
 def build_retriever(settings) -> tuple[Retriever, str]:
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI):
     if not hasattr(app.state, "llm"):
         app.state.llm = ChatClient(settings)
     app.state.top_k = settings.top_k
+    app.state.strict = getattr(app.state, "strict", settings.strict_citations)
     yield
 
 
@@ -93,8 +95,8 @@ def ask(request: Request, body: AskRequest) -> dict:
     hits = retriever.search_balanced(body.question, k=body.k or st.top_k, mode=mode, collections=body.collections)
     response = {"question": body.question, "sources": [h.to_dict() for h in hits]}
     if not hits:
-        response.update(answer="I could not find relevant sources in the local corpus for this question.",
-                        citation_check={"status": "warn", "cited": [], "issues": []})
+        response.update(answer=NOT_SURE[detect_lang(body.question)],
+                        citation_check={"status": "pass", "cited": [], "issues": []})
         return response
     try:
         answer = st.llm.chat(build_messages(body.question, hits))
@@ -103,4 +105,7 @@ def ask(request: Request, body: AskRequest) -> dict:
         return response
     report = check_answer(answer, [h.ref for h in hits], retriever.store)
     response.update(answer=answer, citation_check=report.to_dict())
+    if report.status == "fail" and st.strict:
+        # An invented reference or a misquote: don't show it as an answer.
+        response.update(answer=NOT_SURE[detect_lang(body.question)], unverified_answer=answer)
     return response

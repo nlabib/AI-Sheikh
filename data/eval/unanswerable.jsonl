@@ -1,0 +1,14 @@
+{"id": "u-en-01", "lang": "en", "query": "Which Quran verse says 'God helps those who help themselves'?", "expected": "not_sure"}
+{"id": "u-en-02", "lang": "en", "query": "Quote the hadith 'Seek knowledge even if you have to go to China' from Sahih Bukhari.", "expected": "not_sure"}
+{"id": "u-en-03", "lang": "en", "query": "Which hadith says cleanliness is next to godliness? Give the reference.", "expected": "not_sure"}
+{"id": "u-en-04", "lang": "en", "query": "What is the text of Quran 115:1?", "expected": "not_sure"}
+{"id": "u-en-05", "lang": "en", "query": "What is the text of Sahih Bukhari hadith number 99999?", "expected": "not_sure"}
+{"id": "u-en-06", "lang": "en", "query": "Which verse of the Quran mentions Bangladesh by name?", "expected": "not_sure"}
+{"id": "u-en-07", "lang": "en", "query": "What did the Prophet say about using smartphones in the mosque?", "expected": "not_sure"}
+{"id": "u-en-08", "lang": "en", "query": "Quote the hadith about seeking knowledge from the cradle to the grave from the six books.", "expected": "not_sure"}
+{"id": "u-bn-01", "lang": "bn", "query": "কুরআনের কোন আয়াতে বাংলাদেশের নাম উল্লেখ আছে?", "expected": "not_sure"}
+{"id": "u-bn-02", "lang": "bn", "query": "বুখারী শরীফের ৯৯৯৯৯ নম্বর হাদিসটি কী?", "expected": "not_sure"}
+{"id": "u-bn-03", "lang": "bn", "query": "'জ্ঞান অর্জনের জন্য প্রয়োজনে চীন দেশে যাও' হাদিসটি সহীহ বুখারীর কোথায় আছে?", "expected": "not_sure"}
+{"id": "u-ar-01", "lang": "ar", "query": "ما نص الآية 115:1 من القرآن؟", "expected": "not_sure"}
+{"id": "u-ar-02", "lang": "ar", "query": "أين ورد في صحيح البخاري حديث اطلبوا العلم ولو في الصين؟", "expected": "not_sure"}
+{"id": "u-ar-03", "lang": "ar", "query": "ما الآية التي تذكر بنغلاديش بالاسم؟", "expected": "not_sure"}

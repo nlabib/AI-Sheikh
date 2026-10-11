@@ -5,7 +5,8 @@
 
 What these examples teach: the answer FORMAT the server expects (quote the
 source verbatim, put the exact [ref] marker after it, answer in the question's
-language, say so when the sources do not cover the question). They are made by
+language) and honesty: begin with "I'm not sure" when the sources do not cover
+the question, including when it asks for a verse the sources don't contain. They are made by
 filling templates with real passages, so every quote is correct by
 construction. They do NOT teach fiqh or interpretation; that needs examples
 written or reviewed by someone qualified (data/sft/reviewed/*.jsonl, merged in
@@ -24,7 +25,7 @@ import random
 from pathlib import Path
 
 from app.config import ROOT, get_settings
-from app.prompts import build_messages
+from app.prompts import NOT_SURE, build_messages
 from app.refs import HADITH_COLLECTIONS, parse_ref
 from app.retrieve import Hit, Retriever
 from app.store import Passage, Store
@@ -33,13 +34,7 @@ from app.surahs import SURAHS
 SFT_DIR = ROOT / "data" / "sft"
 GOLD = ROOT / "data" / "eval" / "gold.jsonl"
 
-_NO_ANSWER = {
-    "en": "The sources I was given do not address this question, so I cannot answer it reliably. "
-          "Please ask a qualified scholar.",
-    "bn": "আমাকে দেওয়া উৎসগুলোতে এই প্রশ্নের উত্তর নেই, তাই আমি নির্ভরযোগ্যভাবে উত্তর দিতে পারছি না। "
-          "অনুগ্রহ করে একজন যোগ্য আলেমকে জিজ্ঞাসা করুন।",
-    "ar": "المصادر المتاحة لي لا تتناول هذا السؤال، فلا أستطيع الإجابة عنه بدقة. يرجى سؤال عالم مختص.",
-}
+_NO_ANSWER = NOT_SURE
 
 # Questions on topics the corpus cannot answer (modern events, other religions' texts, personal data).
 _OFF_CORPUS = {
@@ -129,6 +124,38 @@ def _no_answer(store: Store, rng: random.Random, lang: str, numbers: dict[str, l
             "answer": _NO_ANSWER[lang], "kind": "no_answer"}
 
 
+_MISSING = {
+    "en": "I'm not sure. The sources I was given do not include {label}, so I cannot quote or explain it. "
+          "Please check a printed copy or ask a qualified scholar.",
+    "bn": "আমি নিশ্চিত নই। আমাকে দেওয়া উৎসগুলোতে {label} নেই, তাই আমি এটি উদ্ধৃত বা ব্যাখ্যা করতে পারছি না। "
+          "অনুগ্রহ করে মুদ্রিত কপি দেখুন বা একজন যোগ্য আলেমকে জিজ্ঞাসা করুন।",
+    "ar": "لست متأكدًا. المصادر المتاحة لي لا تتضمن {label}، فلا أستطيع نقله أو شرحه. يرجى الرجوع إلى نسخة مطبوعة أو سؤال عالم مختص.",
+}
+
+
+def _missing_ref(store: Store, rng: random.Random, lang: str, numbers: dict[str, list[str]]) -> dict | None:
+    """An Islamic question about a specific verse whose text is NOT among the sources.
+
+    This is the case that matters most for honesty: the model may well "know" the
+    verse from pre-training, but it must not answer from memory when the
+    evidence isn't in front of it.
+    """
+    asked = f"quran:{rng.choice(numbers['quran'])}"
+    s, a = parse_ref(asked).number.split(":")
+    hits = [h for h in (_trainable_hit(store, f"quran:{rng.choice(numbers['quran'])}") for _ in range(3))
+            if h and h.ref != asked]
+    if not hits:
+        return None
+    if lang == "en":
+        q, label = f"What does Quran {s}:{a} say?", f"Quran {s}:{a}"
+    elif lang == "bn":
+        q, label = f"কুরআনের {s}:{a} আয়াতে কী বলা হয়েছে?", f"কুরআনের {s}:{a} আয়াত"
+    else:
+        q, label = f"ما نص الآية {s}:{a}؟", f"الآية {s}:{a}"
+    return {"question": q, "lang": lang, "hits": hits, "answer": _MISSING[lang].format(label=label),
+            "kind": "missing_ref"}
+
+
 def _to_example(item: dict) -> dict:
     messages = build_messages(item["question"], item["hits"])
     messages.append({"role": "assistant", "content": item["answer"]})
@@ -148,7 +175,7 @@ def build(store: Store, per_kind: int, seed: int) -> list[dict]:
     gold_queries = {json.loads(line)["query"] for line in GOLD.read_text().splitlines() if line.strip()}
 
     makers = [lambda l: _quran_lookup(store, rng, l, numbers), lambda l: _hadith_lookup(store, rng, l, numbers),
-              lambda l: _no_answer(store, rng, l, numbers)]
+              lambda l: _no_answer(store, rng, l, numbers), lambda l: _missing_ref(store, rng, l, numbers)]
     langs = ["en", "bn", "ar"]
     out, seen = [], set()
     for make in makers:
@@ -170,7 +197,7 @@ def build(store: Store, per_kind: int, seed: int) -> list[dict]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--per-kind", type=int, default=300, help="examples per kind (3 kinds)")
+    ap.add_argument("--per-kind", type=int, default=300, help="examples per kind (4 kinds)")
     ap.add_argument("--valid-share", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out-dir", type=Path, default=SFT_DIR)
