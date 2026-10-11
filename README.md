@@ -11,10 +11,10 @@ question (en / bn / ar)
   -> top sources, with Arabic text, translations and hadith gradings
   -> Qwen3 via LM Studio, told to answer only from those sources and cite them
   -> citation check: invented refs, refs it wasn't given, misquotes, uncited claims
-  -> answer + sources + check status
+  -> answer + sources + check status ("I'm not sure" replaces any answer that fails the check)
 ```
 
-**Status:** working retrieval and API over the full corpus (121,064 passages), 44 passing tests,
+**Status:** working retrieval and API over the full corpus (121,064 passages), 50 passing tests,
 keyword-search baseline measured (`docs/RESULTS.md`). Not yet done: measuring semantic search,
 and any real training run. Read the limits section before relying on an answer.
 
@@ -85,7 +85,8 @@ LM Studio. Configs for 8, 12 and 24 GB cards are in `training/configs/` (default
 Environment variables (see `app/config.py`): `LM_BASE_URL` (default
 `http://127.0.0.1:1234/v1`), `LM_MODEL`, `LM_API_KEY`, `EMBED_MODEL`
 (default `intfloat/multilingual-e5-small`; `-base` or `-large` are better and slower),
-`EMBEDDER` (`e5` or `hashing`), `DB_PATH`, `INDEX_DIR`, `TOP_K`.
+`EMBEDDER` (`e5` or `hashing`), `DB_PATH`, `INDEX_DIR`, `TOP_K`, `STRICT_CITATIONS`
+(default `1`: answers that fail the citation check are replaced with "I'm not sure").
 
 ## Sources and licences
 

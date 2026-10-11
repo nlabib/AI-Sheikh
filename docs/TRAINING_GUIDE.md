@@ -143,16 +143,20 @@ will produce a correct, cited answer. Retrieval quality is the ceiling on answer
 python -m tools.build_sft
 ```
 
-This writes `data/sft/train.jsonl` (855 examples) and `data/sft/valid.jsonl` (45). Open
+This writes `data/sft/train.jsonl` (1,140 examples) and `data/sft/valid.jsonl` (60). Open
 `train.jsonl` and read a few lines. Each one is a conversation:
 
 - **system**: the rules (cite everything, quote word for word, don't issue fatwas)
 - **user**: the retrieved sources, then the question, exactly as the server builds them
 - **assistant**: the answer we want the model to learn to write
 
-There are three kinds, in English, Bangla and Arabic: look up a verse, look up a hadith (with
-its grading), and decline a question the sources don't cover. They are generated from
-templates, so every quote is exact, but they only teach *format*. Only sources whose licence
+There are four kinds, in English, Bangla and Arabic: look up a verse, look up a hadith (with
+its grading), and two kinds of honest refusal. Those start with "I'm not sure" ("আমি নিশ্চিত নই",
+"لست متأكدًا"): one for questions the sources don't cover at all, and one for a question about a
+specific verse whose text is *not* among the sources. The second matters most. Qwen has
+probably seen that verse during pre-training and could "remember" it, sometimes wrongly; we
+want it to say it isn't sure rather than answer from memory. The examples are generated from
+templates, so every quote is exact, but they teach *format and honesty*, not knowledge. Only sources whose licence
 allows it (Arabic Quran, Pickthall's public-domain English, classical Arabic hadith) are used.
 
 **To teach real answering skill**, write your own examples in the same format, ideally checked
@@ -235,7 +239,18 @@ LM_MODEL=<your model id> python -m tools.eval_answers --out results/finetuned.js
 
 Find model ids with `curl http://127.0.0.1:1234/v1/models`. For each question this records
 whether the answer's citations pass the checker and whether it cites one of the expected
-sources. Fine-tuning has helped if pass rate and "cited expected" go up. Then read twenty
+sources. It also asks 14 trick questions the sources can't answer (a "verse" that is really a
+proverb, a hadith number that doesn't exist, surah 115), and counts how often the model says
+"I'm not sure" instead of inventing an answer. Fine-tuning has helped if pass rate, "cited
+expected" and the not-sure rate on trick questions go up, without it saying "not sure" to
+questions it should answer.
+
+**A safety net that doesn't depend on training:** the server runs the citation checker on every
+answer. If an answer cites a verse or hadith that doesn't exist, cites something it wasn't
+given, or misquotes, the user gets "I'm not sure" instead, and the original answer is kept in
+`unverified_answer` for you to inspect. Set `STRICT_CITATIONS=0` to turn this off. No model can
+be guaranteed never to be wrong, but this means an invented reference never reaches the user as
+an answer. Then read twenty
 answers yourself. The checker can catch a wrong verse number or a misquote, but it cannot tell
 whether an explanation is right.
 

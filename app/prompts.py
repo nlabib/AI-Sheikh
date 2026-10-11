@@ -11,11 +11,20 @@ Rules:
 1. Every factual sentence ends with the marker of the source that supports it, copied exactly, e.g. [quran:2:255] or [bukhari:1].
 2. Quote source text only word for word, inside double quotes, followed by its marker.
 3. Never cite a marker that is not in the sources. Never invent verse or hadith numbers.
-4. If the sources do not answer the question, say so plainly and suggest asking a qualified scholar. Do not answer from memory.
+4. If the sources do not clearly answer the question, or you are unsure, begin your answer with "I'm not sure" (in Bangla "আমি নিশ্চিত নই", in Arabic "لست متأكدًا"), say what the sources do and do not cover, and suggest asking a qualified scholar. Never fill gaps from memory.
 5. Do not issue fatwas. For rulings that depend on circumstances or differ between schools, present what the sources say and recommend a qualified scholar.
 6. Answer in the language of the question ({lang_name})."""
 
 LANG_NAMES = {"en": "English", "bn": "Bangla", "ar": "Arabic"}
+
+# What the model says (and what the server substitutes) when an answer cannot be backed by the sources.
+NOT_SURE = {
+    "en": "I'm not sure. The sources I was given do not answer this, so I won't guess. "
+          "Please ask a qualified scholar.",
+    "bn": "আমি নিশ্চিত নই। আমাকে দেওয়া উৎসগুলোতে এর উত্তর নেই, তাই আমি অনুমান করব না। "
+          "অনুগ্রহ করে একজন যোগ্য আলেমকে জিজ্ঞাসা করুন।",
+    "ar": "لست متأكدًا. المصادر المتاحة لي لا تجيب عن هذا، فلن أخمّن. يرجى سؤال عالم مختص.",
+}
 
 
 def format_evidence(hits: list, max_chars: int = 1200) -> str:

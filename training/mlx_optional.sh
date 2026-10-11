@@ -12,7 +12,7 @@ set -euo pipefail
 MODEL="${MODEL:-Qwen/Qwen3-4B}"
 DATA_DIR="${DATA_DIR:-data/sft}"
 ADAPTER="${ADAPTER:-outputs/islamic-qwen-mlx-adapter}"
-ITERS="${ITERS:-1700}"   # micro-batches, not optimiser steps: ~2 epochs of the default 855 examples
+ITERS="${ITERS:-2300}"   # micro-batches, not optimiser steps: ~2 epochs of the default 1,140 examples
 BATCH="${BATCH:-1}"
 GRAD_ACCUM="${GRAD_ACCUM:-16}"  # effective batch = BATCH x GRAD_ACCUM, as in the CUDA config
 LAYERS="${LAYERS:-16}"      # how many transformer layers get LoRA adapters

@@ -25,10 +25,11 @@ _QUOTE = re.compile(r"[\"“«]([^\"”»]{12,}?)[\"”»]")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?।؟])\s+|\n+")
 # Sentences like these do not need a source.
 _EXEMPT = re.compile(
-    r"(allah knows best|(?:ask|consult)\w* (?:with )?(?:a |an |your )?(?:qualified |local |trusted )?"
-    r"(?:scholar|imam|mufti)|not (?:found|covered)|do not (?:have|address|cover)|don't have|"
+    r"(i'?m not sure|i am not sure|আমি নিশ্চিত নই|لست متأكد|allah knows best|(?:ask|consult)\w* (?:with )?(?:a |an |your )?(?:qualified |local |trusted )?"
+    r"(?:scholar|imam|mufti)|not (?:found|covered)|do(?: not|n't) (?:have|address|cover|answer|include)|"
+    r"won't guess|will not guess|"
     r"cannot (?:find|answer)|আল্লাহই ভালো জানেন|আলেমকে|আলেমের|উত্তর নেই|পারছি না|"
-    r"والله أعلم|لا تتناول|لا أستطيع|سؤال عالم|عالم مختص)",
+    r"والله أعلم|لا تتناول|لا تجيب|لا تتضمن|لن أخم|لا أستطيع|سؤال عالم|عالم مختص)",
     re.I,
 )
 
@@ -53,7 +54,14 @@ class CitationReport:
         return {"status": self.status, "cited": self.cited, "issues": [i.to_dict() for i in self.issues]}
 
 
-FAIL_KINDS = {"nonexistent_reference", "uncited_evidence", "misquote"}
+FAIL_KINDS = {"nonexistent_reference", "uncited_evidence", "misquote", "unsupported_answer"}
+
+
+_NOT_SURE = re.compile(r"(i'?m not sure|i am not sure|আমি নিশ্চিত নই|لست متأكد)", re.I)
+
+
+def says_not_sure(answer: str) -> bool:
+    return bool(_NOT_SURE.search(answer))
 
 
 def _sentences(answer: str) -> list[str]:
@@ -138,7 +146,14 @@ def check_answer(answer: str, evidence_refs: list[str], store: Store, min_overla
         if texts and not verified_quote and _overlap(sentence, texts) < min_overlap:
             issues.append(Issue("weak_support", "little shared vocabulary with the cited source", sentence))
 
-    declined = not cited and bool(_EXEMPT.search(answer))
+    uncited_claims = any(i.kind == "uncited_claim" for i in issues)
+    # A pure refusal ("I'm not sure...") is correct. A refusal followed by claims is a guess.
+    declined = not cited and bool(_EXEMPT.search(answer)) and not uncited_claims
+    if not cited and not declined:
+        # Substantive claims with no citation at all are an answer from memory.
+        kind = "unsupported_answer" if uncited_claims else "no_citations"
+        issues.append(Issue(kind, "the answer makes claims but cites nothing"
+                            if uncited_claims else "the answer cites nothing"))
     if any(i.kind in FAIL_KINDS for i in issues):
         status = "fail"
     elif declined:
@@ -147,7 +162,5 @@ def check_answer(answer: str, evidence_refs: list[str], store: Store, min_overla
         status = "warn"
     else:
         status = "pass"
-    if not cited and not declined:
-        issues.append(Issue("no_citations", "the answer cites nothing"))
     return CitationReport(status, list(dict.fromkeys(cited)), issues)
 
