@@ -111,7 +111,10 @@ DEFAULTS: dict[str, Any] = {
     "gradient_checkpointing": True,
     "load_in_4bit": True,
     "logging_steps": 10,
+    "eval_steps": 20,  # measure valid loss this often, so you can watch for overfitting
     "save_steps": 200,
+    # Where Trainer sends its logs: "tensorboard" writes charts to <out>/runs (see TRAINING_GUIDE, "Watching training").
+    "report_to": "tensorboard",
     "seed": 42,
 }
 

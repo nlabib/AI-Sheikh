@@ -64,6 +64,32 @@ median 773 tokens, max 2,399; 219,760 answer tokens carry the loss; 72 steps per
   (same effective batch of 16) or `--max-len 2560` (the longest example is 2,399 tokens), and compare
   s/step and shared memory.
 
+- That second smoke run reached step 20 (checkpoint saved) before my session was cut off, so its final
+  eval and adapter save never ran. Numbers: valid loss before training **0.595**; train loss **0.257**
+  at step 10 and **0.021** at step 20. A loss near zero after only 20 steps means the templated answers
+  are very easy to learn, so the full 2-epoch run is at risk of memorising them. Watch valid loss.
+- Third smoke run, `--batch-size 2 --grad-accum 8` (same effective batch of 16): shared memory dropped
+  from 19.4 GB to **0.36 GB** and steps took **~18 s** instead of ~22 s. I used these settings for the full run.
+
+### Qwen3's "thinking mode" and LM Studio
+
+Qwen3 can "think out loud" in a `<think>...</think>` block before answering. The training data is
+rendered with thinking **off**, so every prompt the model learned from ends with an empty
+`<think></think>` and the answer follows straight away. LM Studio uses the chat template stored inside
+the GGUF file, and Qwen3's stock template has thinking **on** unless the caller passes
+`enable_thinking=false`, which an OpenAI-style request (what `eval_answers` sends) can't do.
+
+So I added `training/no_think_template.py`, which flips the template's default to thinking off before
+conversion. I converted the base model twice: once with the stock template (what you get out of the box)
+and once with thinking off, the same way as the fine-tuned model, for a fair comparison.
+
+| GGUF | Time | Size | LM Studio id |
+|---|---|---|---|
+| base, stock template | 65 s | 8.05 GB (f16) | `ai-sheikh-base` |
+| base, thinking off | 33 s | 8.05 GB (f16) | `ai-sheikh-base-nothink` |
+
+`lms import -L` hard-links the file into LM Studio's models folder, so it costs no extra disk space.
+
 **Not done yet:** smoke-run final numbers, full run, GGUF conversion, base-vs-fine-tuned evaluation.
 llama.cpp is cloned at `C:\Users\labib\src\llama.cpp` with its own `.venv`, because its requirements
 pin a CPU torch that would overwrite the CUDA one. LM Studio has no Qwen3-4B, so the plan is to convert

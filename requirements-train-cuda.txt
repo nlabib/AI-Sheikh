@@ -6,3 +6,5 @@ peft>=0.11
 bitsandbytes>=0.43
 accelerate>=0.30
 pyyaml>=6.0
+tensorboard>=2.16   # training charts: tensorboard --logdir outputs
+nvidia-ml-py>=12   # lets the charts show GPU utilisation
