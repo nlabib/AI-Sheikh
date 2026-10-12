@@ -132,7 +132,9 @@ def answer_question(retriever: Retriever, llm, question: str, k: int, collection
         return {"question": question, "sources": [], "answer": intro,
                 "citation_check": {"status": "pass", "cited": [], "issues": []}}
     mode = mode if (mode != "vector" or retriever.index is not None) else "fts"
-    hits = retriever.search_balanced(question, k=k, mode=mode, collections=collections,
+    # The reranker fills k from a larger pool itself; the E5 floor needs spare candidates to fill from too.
+    e5_floor = min_relevance > 0 and retriever.reranker is None
+    hits = retriever.search_balanced(question, k=3 * k if e5_floor else k, mode=mode, collections=collections,
                                      min_rerank=min_relevance if retriever.reranker is not None else 0.0)
     if retriever.reranker is not None:
         relevance = {h.ref: h.rerank for h in hits if h.rerank is not None}
@@ -144,6 +146,9 @@ def answer_question(retriever: Retriever, llm, question: str, k: int, collection
     if min_relevance > 0 and relevance:
         # Passages that aren't about the question only invite the model to cite them anyway.
         hits = [h for h in hits if relevance.get(h.ref, 1.0) >= min_relevance]
+    if e5_floor:
+        explicit = [h for h in hits if "reference" in h.matched_by]
+        hits = explicit + [h for h in hits if "reference" not in h.matched_by][:max(k - len(explicit), k // 2)]
     response = {"question": question, "sources": [dict(h.to_dict(), relevance=relevance.get(h.ref))
                                                    for h in hits]}
     if not hits:
