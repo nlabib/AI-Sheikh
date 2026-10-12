@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from difflib import get_close_matches
 
 from app.surahs import SURAHS
-from app.text import normalize
+from app.text import normalize, tokenize
 
 HADITH_COLLECTIONS = {
     "bukhari": "Sahih al-Bukhari",
@@ -44,7 +44,9 @@ _ALIASES = {
 }
 
 # Words people put between a collection name and the number: "Bukhari hadith no. 1", "مسلم حديث رقم ٣٩٤".
-_FILLER = r"(?:\s*(?:hadith|hadees|hadis|number|num|no\.?|nr\.?|#|নং|নম্বর|হাদিস|হাদীস|حديث|رقم)\b\.?)*"
+# The word boundary only goes on the Latin words: Bangla words end in a vowel sign, which \b doesn't count as a
+# word character, so "নং\b" never matches before a space.
+_FILLER = r"(?:\s*(?:(?:hadith|hadees|hadis|number|num|no|nr)\b|#|নং|নম্বর|হাদিস|হাদীস|حديث|رقم)\.?)*"
 _SURAH_WORD = r"(?:surah|sura|surat|soorah|সূরা|সুরা|سوره|سورة)"
 # Surahs this short are given whole when named; longer ones are left to ordinary search.
 WHOLE_SURAH_MAX_AYAT = 12
@@ -61,7 +63,7 @@ _CONNECTORS = {"and", "&", "or", "و", "এবং", "ও"}
 def _asks_for_surah_text(q: str) -> bool:
     if _ASKS_FOR_TEXT.search(q):
         return True
-    words = [w for w in re.findall(r"[\w'-]+", q) if not re.fullmatch(_SURAH_WORD, w) and w not in _CONNECTORS]
+    words = [w for w in tokenize(q) if not re.fullmatch(_SURAH_WORD, w) and w not in _CONNECTORS]
     return len(words) <= 3  # "Surah Ikhlas", "surah ikhlas and surah nas", "سورة الإخلاص"
 
 
@@ -75,6 +77,26 @@ def _fold_name(name: str) -> str:
     return re.sub(r"h$", "", n)
 
 
+# Arabic and Bangla names of the surahs short enough to hand over whole (WHOLE_SURAH_MAX_AYAT).
+_LOCAL_SURAH_NAMES = {
+    1: ["الفاتحة", "ফাতিহা", "ফাতিহাহ"], 62: ["الجمعة", "জুমুআ", "জুমুআহ", "জুমা"],
+    63: ["المنافقون", "মুনাফিকুন"], 65: ["الطلاق", "তালাক"], 66: ["التحريم", "তাহরীম"],
+    93: ["الضحى", "দুহা", "দোহা", "দুহা"], 94: ["الشرح", "الانشراح", "ইনশিরাহ", "শারহ"], 95: ["التين", "তীন", "ত্বীন"],
+    97: ["القدر", "কদর", "ক্বদর", "কদর"], 98: ["البينة", "বাইয়্যিনাহ", "বাইয়িনাহ", "বায়্যিনাহ"],
+    99: ["الزلزلة", "যিলযাল", "যালযালাহ", "যিলযাল"], 100: ["العاديات", "আদিয়াত"], 101: ["القارعة", "কারিআহ", "ক্বারিআহ"],
+    102: ["التكاثر", "তাকাসুর"], 103: ["العصر", "আসর"], 104: ["الهمزة", "হুমাযাহ"], 105: ["الفيل", "ফীল"],
+    106: ["قريش", "কুরাইশ"], 107: ["الماعون", "মাউন"], 108: ["الكوثر", "কাওসার", "কাউসার"],
+    109: ["الكافرون", "কাফিরুন", "কাফিরূন"], 110: ["النصر", "নাসর"], 111: ["المسد", "اللهب", "লাহাব", "মাসাদ"],
+    112: ["الإخلاص", "ইখলাস"], 113: ["الفلق", "ফালাক", "ফালাক্ব"], 114: ["الناس", "নাস"],
+}
+
+
+def _fold_local(name: str) -> str:
+    n = re.sub(r"^আল[-\s]?", "", normalize(name).replace("ী", "ি").replace("ূ", "ু"))
+    return n[2:] if n.startswith("ال") and len(n) > 4 else n
+
+
+_SURAH_BY_LOCAL_NAME = {_fold_local(n): num for num, names in _LOCAL_SURAH_NAMES.items() for n in names}
 _SURAH_BY_NAME = {_fold_name(name): num for num, (name, _meaning, _n) in SURAHS.items()}
 
 MARKER = re.compile(r"\[((?:quran:\d{1,3}:\d{1,3}(?:-\d{1,3})?)|(?:[a-z]+:\d+(?:\.\d+)?))\]")
@@ -156,10 +178,16 @@ def find_explicit_refs(query: str) -> list[str]:
                 if num:
                     found += surah_refs(num)
                     break
+        for name in re.findall(_SURAH_WORD + r"\s*((?:আল-?\s?)?[\u0600-\u06FF\u0980-\u09FF]+)", q):
+            num = _SURAH_BY_LOCAL_NAME.get(_fold_local(name))
+            if num:
+                found += surah_refs(num)
     for key, names in _ALIASES.items():
         if key == "quran":
             continue
         for name in names:
-            for num in re.findall(re.escape(normalize(name)) + _FILLER + r"\s*(\d{1,5})\b", q):
-                found.append(hadith_ref(key, int(num)))
+            # Muslim is often cited by Abd al-Baqi number with a letter ("Muslim 1907a"); the retriever looks
+            # those up through alt_number.
+            for num, letter in re.findall(re.escape(normalize(name)) + _FILLER + r"\s*(\d{1,5})([a-z]?)\b", q):
+                found.append(f"{key}:{int(num)}{letter}" if letter and key == "muslim" else hadith_ref(key, int(num)))
     return list(dict.fromkeys(found))

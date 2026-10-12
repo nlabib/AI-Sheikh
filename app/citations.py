@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
-from app.refs import MARKER, expand_marker, find_markers
+from app.refs import HADITH_COLLECTIONS, MARKER, expand_marker, find_markers
 from app.store import Store
 from app.text import normalize, strip_footnotes, tokenize
 
@@ -137,13 +137,25 @@ def _misattributed(sentence: str, refs: list[str]) -> str | None:
     return None
 
 
+# Book names and hadith grades ("মান: Sahih according to Al-Albani") are copied from the sources in English.
+_GRADE_LINE = re.compile(r"^\s*(?:মান|الحكم|grade)\s*:.*$", re.MULTILINE | re.IGNORECASE)
+_BOOK_NAMES = re.compile("|".join(re.escape(n) for n in sorted(HADITH_COLLECTIONS.values(), key=len, reverse=True)),
+                        re.IGNORECASE)
+
+
 def _foreign_letters(answer: str, lang: str) -> int:
     """Letters in a script the question wasn't written in, outside quotations. Arabic is allowed anywhere
-    (verse text, names), and so is English in a Bangla or Arabic answer (book names like Sahih Muslim)."""
+    (verse text, names), and so is a little English in a Bangla or Arabic answer (book names like Sahih
+    Muslim); an answer written mostly in English counts all its English letters."""
     plain = _unquoted(answer)
-    if lang in ("en", "ar"):
-        return len(_LETTERS["bn"].findall(plain))
-    return 0
+    foreign = len(_LETTERS["bn"].findall(plain)) if lang in ("en", "ar") else 0
+    if lang in ("bn", "ar"):
+        rest = _BOOK_NAMES.sub(" ", _GRADE_LINE.sub(" ", plain))
+        latin = re.findall(r"[A-Za-z][A-Za-z'-]*", rest)
+        native = [w for w in rest.split() if _LETTERS[lang].search(w)]
+        if len(latin) >= 5 and len(latin) > len(native):
+            foreign += sum(map(len, latin))
+    return foreign
 
 
 def _overlap(sentence: str, texts: list[str]) -> float:
