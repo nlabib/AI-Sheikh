@@ -22,14 +22,22 @@ class ChatClient:
         self.model = settings.lm_model
         self.api_key = settings.lm_api_key
         self.timeout = settings.lm_timeout
+        self.thinking = settings.thinking
 
     def chat(self, messages: list[dict], temperature: float = 0.2, max_tokens: int = 1024) -> str:
+        body = {"model": self.model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
+        if not self.thinking:
+            # Ask for Qwen3's non-thinking mode, the format the fine-tuned model was trained on: its prompt
+            # must end in an empty <think></think>. A fine-tuned model shown the thinking-mode prompt instead
+            # can emit junk before answering. LM Studio reads reasoning_effort; llama.cpp's server reads
+            # chat_template_kwargs. Servers ignore the one they don't know.
+            body["reasoning_effort"] = "none"
+            body["chat_template_kwargs"] = {"enable_thinking": False}
         try:
             r = httpx.post(
                 f"{self.base_url}/chat/completions",
                 headers={"Authorization": f"Bearer {self.api_key}"},
-                json={"model": self.model, "messages": messages, "temperature": temperature,
-                      "max_tokens": max_tokens},
+                json=body,
                 timeout=self.timeout,
             )
             r.raise_for_status()

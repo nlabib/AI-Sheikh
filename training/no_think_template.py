@@ -3,11 +3,14 @@
     python -m training.no_think_template outputs/islamic-qwen-merged
 
 The training data is rendered with enable_thinking=False, so every prompt the model
-learned from ends in an empty "<think></think>" block. LM Studio and llama.cpp use the
-chat template stored in the GGUF, and Qwen3's template only adds that empty block when
-the caller passes enable_thinking=false, which an OpenAI-style request can't do. This
-flips the default so the served model sees prompts in the same shape it was trained on.
-A caller can still turn thinking on with enable_thinking=true.
+learned from ends in an empty "<think></think>" block. Qwen3's template only adds that
+block when the caller passes enable_thinking=false; this flips the default, so tools that
+use the GGUF's template as-is (llama.cpp's CLI and server) show the model the format it
+was trained on. A caller can still turn thinking on with enable_thinking=true.
+
+LM Studio ignores this default and turns thinking on itself unless the request says
+"reasoning_effort": "none", which app/llm.py sends. Shown the thinking-mode prompt, the
+fully trained model emitted junk before many answers (docs/TRAINING_LOG.md).
 """
 
 from __future__ import annotations

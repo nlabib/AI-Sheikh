@@ -89,12 +89,132 @@ and once with thinking off, the same way as the fine-tuned model, for a fair com
 | base, thinking off | 33 s | 8.05 GB (f16) | `ai-sheikh-base-nothink` |
 
 `lms import -L` hard-links the file into LM Studio's models folder, so it costs no extra disk space.
+(Correction found later: LM Studio ignores the template's default. See "The junk-answer hunt" below.)
 
-**Not done yet:** smoke-run final numbers, full run, GGUF conversion, base-vs-fine-tuned evaluation.
-llama.cpp is cloned at `C:\Users\labib\src\llama.cpp` with its own `.venv`, because its requirements
-pin a CPU torch that would overwrite the CUDA one. LM Studio has no Qwen3-4B, so the plan is to convert
-both base and fine-tuned to GGUF the same way (`lms import`) for a fair comparison. Watch out for
-Qwen3's thinking mode in the base model: `eval_answers` uses `max_tokens=1024`.
+## Step 6a, continued: the full run
+
+```
+python -m training.train_cuda --config training/configs/qwen3-4b-24gb.yaml --batch-size 2 --grad-accum 8
+```
+
+| | |
+|---|---|
+| Time | **57.7 min** (144 steps, ~18 s each, 2 epochs) |
+| Peak VRAM | **14.4 GB** of 24 |
+| Trainable parameters | 66.1 M of 4.09 B (1.6%) |
+| valid loss | **0.753** before, **0.0019** after |
+| train loss | 0.32 (step 10), 0.024 (step 20), 0.002 (step 30), then ~0.0001 to the end |
+| grad norm | ~0.2 at the start, ~0.001 at the end |
+
+What it means: the format was learned in about 30 steps; after that there was nothing left to learn
+from templates, and the second epoch just memorised them. The valid loss can't show this, because
+`valid.jsonl` comes from the same templates. See the charts below.
+
+## Step 8: Package for LM Studio
+
+| Command | Time |
+|---|---|
+| `python -m training.merge_lora --adapter outputs/islamic-qwen-lora/adapter --out outputs/islamic-qwen-merged` | 32 s (CPU) |
+| `python -m training.no_think_template outputs/islamic-qwen-merged` | instant |
+| `python llama.cpp/convert_hf_to_gguf.py outputs/islamic-qwen-merged --outfile outputs/gguf/ai-sheikh-ft-f16.gguf --outtype f16` | 18 s, 8.05 GB |
+| `lms import -L --user-repo local/ai-sheikh-ft outputs/gguf/ai-sheikh-ft-f16.gguf` | instant |
+
+The first merge failed to convert: transformers 5 saves the tokenizer as `tokenizer.json` only, and
+llama.cpp's converter needs `vocab.json`/`merges.txt`. LoRA never changes the tokenizer, so
+`merge_lora.py` now copies the base model's original tokenizer files (fix 4).
+
+llama.cpp lives at `C:\Users\labib\src\llama.cpp` with its own `.venv`, because its requirements pin a
+CPU-only torch that would overwrite the CUDA one in the project venv.
+
+I also packaged the 20-step smoke adapter the same way (`ai-sheikh-ft20`), to see whether a little
+training already changes behaviour.
+
+## Step 7: Base vs fine-tuned
+
+Commands: `lms load <id> --gpu max -c 16384`, then `LM_MODEL=<id> python -m tools.eval_answers --out results/answers-<id>.json`.
+Each run took 4–7 min (98 questions + 14 trick questions).
+
+First problem: one Bangla question's prompt (six long Bangla hadith) is **8,367 tokens**, which
+overflowed LM Studio's 8,192 context with a "400 Bad Request". The fix was a 16,384 context.
+
+### The junk-answer hunt
+
+The first evaluation of the full fine-tune looked broken. 36 answers began with a stray Chinese
+character (瓢), 17 were empty, English questions got the Bangla "I'm not sure" sentence, and one
+answer repeated "।" hundreds of times. The 20-step model and the base model were fine. I narrowed
+it down one step at a time:
+
+| Test | Result |
+|---|---|
+| 4-bit base + adapter in PyTorch (exactly as trained) | clean, correct answers |
+| bf16 base + adapter, unmerged | clean |
+| merged folder, loaded in float16 and in bfloat16 | clean |
+| GGUF in LM Studio, exact training prompt sent as raw text (`/v1/completions`) | clean |
+| GGUF in LM Studio, normal chat request | **junk first, then the answer** |
+
+So the weights were fine at every stage; the prompt was different. Capturing LM Studio's rendered
+prompt (`lms log stream -s model --filter input`) showed it ends at `<|im_start|>assistant\n`,
+**without** the empty `<think>\n\n</think>\n\n` that every training prompt had. LM Studio turns Qwen3's
+thinking mode on by itself, even when the template in the GGUF defaults to off. A model trained for
+144 steps on one exact format is brittle when shown another; the 20-step model was barely changed,
+so it coped.
+
+Of the request options I tried, only `"reasoning_effort": "none"` made LM Studio add the empty think
+block (`chat_template_kwargs`, `enable_thinking` and `reasoning` were ignored). `app/llm.py` now sends
+it, plus `chat_template_kwargs: {"enable_thinking": false}` for llama.cpp's own server (fix 6).
+`THINKING=1` turns thinking back on. Re-run, the junk disappeared completely: 0 stray characters,
+0 empty answers, 0 wrong-language refusals.
+
+**Lesson:** serve a fine-tuned model with exactly the prompt format it was trained on. The longer you
+train on one format, the less it tolerates any other.
+
+### Results (non-thinking mode, all from the same retrieval)
+
+| model | pass | pass, actually answering | fail | cites an expected source | "not sure" to answerable | trick: "not sure" | trick: cited anyway |
+|---|---|---|---|---|---|---|---|
+| base Qwen3-4B | 18 | 11 | 28 | **60** | 5 | 11/14 | 3/14 |
+| fine-tuned, 20 steps | 42 | 12 | 32 | 41 | 29 | **14/14** | **0/14** |
+| **fine-tuned, 144 steps** | **57** | **32** | **22** | 39 | 6 | 13/14 | 1/14 |
+
+(The expected source was retrieved for 62/98 questions, which caps "cites an expected source".
+In thinking mode, LM Studio's default, the base model scored 5 pass / 38 fail / 10 of 14 trick
+questions declined.)
+
+How to read it:
+
+- **Did it learn to say "I'm not sure" instead of guessing?** Yes. On trick questions (a proverb
+  passed off as a verse, a hadith number that doesn't exist, surah 115) the full fine-tune declined 13
+  of 14 (base: 11) and backed only one answer with citations (base: 3). That one quoted the real,
+  related hadith "purity is half of faith" (Muslim 223) for "cleanliness is next to godliness".
+- **Does it cite its sources?** More reliably. Passing real answers rose from 11 to 32, and failures
+  (made-up references, misquotes, uncited claims) fell from 28 to 22.
+- **The 20-step model over-refuses:** it said "not sure" to 29 answerable questions. More training
+  fixed that (6), so the full run was worth it, even though the loss had flattened.
+- **What templates can't teach:** the templates always quote exactly one source, so the fine-tune
+  writes short answers (233 vs 602 characters), cites 0.9 sources per answer (base: 2.1), and
+  sometimes picks the wrong one of the six, e.g. 2:245 ("a goodly loan") for a question about
+  interest. When the right source was retrieved, the base model cited it 37 of 39 times, the fine-tune
+  27. It also wrote `[1]` instead of `[quran:2:245]` 16 times. Reviewed, multi-source examples (guide
+  step 5) are the way to fix this.
+- **Safety net:** the server replaces any answer that fails the citation check with "I'm not sure"
+  (`STRICT_CITATIONS=1`, the default), so the 22 failing answers would reach a user as "I'm not sure".
+
+## Watching it: TensorBoard
+
+The full run had already finished when the charts were added, so I drew them from its saved history:
+`python -m training.summary_to_tensorboard outputs/islamic-qwen-lora`, then
+`tensorboard --logdir outputs` and http://localhost:6006. New runs log live (fix 7). How to read the
+charts: `docs/TRAINING_GUIDE.md`, "Watching training".
+
+## Where things are on this PC
+
+| What | Where |
+|---|---|
+| repo, venv | `C:\Users\labib\src\AI-Sheikh` |
+| adapter (~260 MB) + `training_summary.json` | `outputs\islamic-qwen-lora\` |
+| merged model | `outputs\islamic-qwen-merged\` |
+| GGUFs (8 GB each, hard-linked into LM Studio) | `outputs\gguf\`; LM Studio ids `ai-sheikh-ft`, `ai-sheikh-ft20`, `ai-sheikh-base`, `ai-sheikh-base-nothink` |
+| answer evaluations | `results\answers-*.json` (non-thinking), `results\thinking-on\` (first runs) |
 
 ## Code fixes made along the way
 
@@ -106,3 +226,12 @@ Qwen3's thinking mode in the base model: `eval_answers` uses `max_tokens=1024`.
    `warmup_ratio` no longer exists.
 3. **Validation loss is now actually measured.** `save_steps` (200) was larger than the whole run
    (144 steps), so eval never ran. Added `eval_on_start` and a final `trainer.evaluate()`.
+4. **Merge output converts to GGUF** (`training/merge_lora.py`): copy the base model's original
+   tokenizer files instead of re-saving them with transformers 5.
+5. **`training/no_think_template.py`**: make the GGUF's template default to non-thinking mode (for
+   llama.cpp; LM Studio overrides it, see fix 6).
+6. **Non-thinking requests** (`app/llm.py`, `THINKING` in `app/config.py`): send
+   `reasoning_effort: none` and `chat_template_kwargs: {enable_thinking: false}` so the served model sees
+   the prompt format it was trained on.
+7. **Training charts** (`training/train_cuda.py`, `training/summary_to_tensorboard.py`): TensorBoard
+   logging by default, eval loss every 20 steps, GPU memory/utilisation charts.

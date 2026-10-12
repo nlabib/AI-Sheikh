@@ -26,6 +26,8 @@ class Settings:
     lm_model: str = field(default_factory=lambda: _env("LM_MODEL", "qwen3-4b"))
     lm_api_key: str = field(default_factory=lambda: _env("LM_API_KEY", "lm-studio"))
     lm_timeout: float = field(default_factory=lambda: float(_env("LM_TIMEOUT", "120")))
+    # Qwen3 "thinking mode". Off by default: the fine-tuning data is non-thinking, so serve it that way.
+    thinking: bool = field(default_factory=lambda: _env("THINKING", "0") == "1")
     top_k: int = field(default_factory=lambda: int(_env("TOP_K", "6")))
     # When an answer fails the citation check, replace it with "I'm not sure" (raw answer kept separately).
     strict_citations: bool = field(default_factory=lambda: _env("STRICT_CITATIONS", "1") != "0")
