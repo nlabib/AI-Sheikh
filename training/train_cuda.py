@@ -182,7 +182,9 @@ def main(argv: list[str] | None = None) -> int:
         report_to=cfg["report_to"],  # TensorBoard writes to <out>/runs/; view with: tensorboard --logdir outputs
         seed=cfg["seed"],
     )
-    callbacks = [gpu_stats_callback(out / "runs" / "gpu")] if "tensorboard" in str(cfg["report_to"]) else []
+    # One directory per run, so a smoke run and the full run into the same output dir stay separate charts.
+    gpu_dir = out / "runs" / f"gpu-{time.strftime('%Y%m%d-%H%M%S')}"
+    callbacks = [gpu_stats_callback(gpu_dir)] if "tensorboard" in str(cfg["report_to"]) else []
     trainer = Trainer(model=model, args=training_args, train_dataset=train_enc,
                       eval_dataset=eval_enc or None, data_collator=collate, callbacks=callbacks)
     t0 = time.time()
