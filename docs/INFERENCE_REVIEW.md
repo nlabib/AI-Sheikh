@@ -25,8 +25,8 @@ What the user sees from the fine-tuned model, judged by hand:
 | verdict | n | meaning |
 |---|---|---|
 | good | 20 | correct and properly cited, or an appropriate "I'm not sure" |
-| caught | 4 | a bad answer that the citation check hid behind "I'm not sure" |
-| hidden by mistake | 2 | a mostly-right answer that the check hid (false positive) |
+| caught | 3 | a bad answer that the citation check hid behind "I'm not sure" (4 before #16 was corrected) |
+| hidden by mistake | 3 | a mostly-right answer that the check hid (false positive; 2 before #16 was corrected) |
 | needless refusal | 3 | "I'm not sure" although the sources it had answered the question |
 | weak | 4 | partly right |
 | **wrong, shown to user** | **7** | wrong or misleading; **3 of these were graded "pass"** |
@@ -64,7 +64,7 @@ Verdicts are for the fine-tuned model. "check" is the citation checker's grade.
 | 13 | ruling | en | Is music haram? | pass | not sure | **good**: declined; no relevant source | warn | 1.2 | 4.0 |
 | 14 | ruling | bn | সুদ খাওয়া কি হারাম? | fail | not sure (replaced) | **net**: 2:275 (the riba verse) retrieved but it quoted Abu Dawud 3331, twice, inexactly | pass | 6.6 | 5.8 |
 | 15 | ruling | ar | هل التدخين حرام؟ | pass | not sure | **good**: declined; no relevant source | fail (replaced) | 1.4 | 3.5 |
-| 16 | ruling | en | How much zakat do I pay on gold? | fail | not sure (replaced) | **net**: invented '20 dinars = 12 Guinea' from Bukhari 1447; Abu Dawud 1564 on gold ignored | warn | 1.6 | 2.3 |
+| 16 | ruling | en | How much zakat do I pay on gold? | fail | not sure (replaced) | **fp** (corrected): '20 dinars = 12 Guinea' is in Bukhari 1447's translator note, but it wrote [1] instead of the marker, so it was hidden; Abu Dawud 1564 on gold ignored | warn | 1.6 | 2.3 |
 | 17 | disputed | en | Should I raise my hands before and after ruku? | pass | not sure | **refuse**: Ibn Majah 858/859 describe exactly this; it declined | warn | 1.5 | 3.5 |
 | 18 | disputed | en | Is celebrating the Prophet's birthday allowed? | pass | not sure | **good**: declined; no relevant source | warn | 1.4 | 3.0 |
 | 19 | disputed | bn | নামাজে বুকে হাত বাঁধতে হবে নাকি নাভির নিচে? | fail | not sure (replaced) | **refuse**: Tirmidhi 252 (right hand over left) retrieved; it declined | warn | 4.0 | 14.5 |
@@ -143,7 +143,7 @@ template wording; add natural, reviewed Bangla and Arabic answers; add a languag
 Examples: #17 raising hands at ruku: Ibn Majah 858 and 859 describe exactly that; the fine-tune said
 "I'm not sure" and the base model quoted both. #19 hand position: Tirmidhi 252 retrieved, declined.
 #14 riba (Bangla): 2:275 retrieved; it quoted another hadith inexactly and was blocked; the base model
-answered correctly with 2:275 (pass). #16 zakat on gold: Abu Dawud 1564 ignored, invented "20 dinars"
+answered correctly with 2:275 (pass). #16 zakat on gold: Abu Dawud 1564 ignored; the "20 dinars" figure is from Bukhari 1447's translator note, cited with [1] and so
 (blocked).
 Cause: **training data.** There are only four template kinds: look up a named verse, look up a named
 hadith, and two refusals. Nothing teaches "present what the sources say on a ruling or disputed issue,
@@ -211,3 +211,125 @@ refusal, exempt sentences that only talk about what the sources do or don't cont
 
 Raw data: `results/probe-ai-sheikh-ft.json`, `results/probe-ai-sheikh-base.json` on the PC (not
 committed, like all `results/`).
+
+## After quick fixes
+
+2026-10-12, after commit 0425dc5 (fixes 2, 3, 7, 8, 10, 11 and an optional relevance floor for 1) plus
+two follow-up fixes made while re-testing (below). Same model, same settings, `MIN_RELEVANCE=0.796`.
+
+### Headline
+
+`tools.eval_answers`, 98 gold + 14 trick questions:
+
+| | before | after |
+|---|---|---|
+| pass / warn / fail | 57 / 19 / 22 | **67** / 13 / **18** |
+| pass while actually answering (not "not sure") | 32 | **41** |
+| cites an expected source | 39 | **51** |
+| "not sure" to answerable questions | 6 | 6 |
+| trick questions: "not sure" / cited anyway | 13 / 1 | 13 / 1 |
+
+The 40 probe questions, judged by hand the same way:
+
+| verdict | before | after |
+|---|---|---|
+| good | 20 | **24** |
+| caught | 3 | 7 |
+| hidden by mistake | 3 | 1 |
+| needless refusal | 3 | **0** |
+| weak | 4 | 3 |
+| **wrong, shown to user** | **7** | **5** |
+
+("Before" uses the corrected verdict for #16, see the table above.)
+
+### What changed, question by question
+
+| # | before → after | why |
+|---|---|---|
+| 3 | wrong → caught | new `misattributed` rule: "the Quran says" followed by a hadith |
+| 22 | weak → caught | same rule |
+| 37 | wrong → caught | an uncited answer must open by declining ("রোজা অনুগ্রহ করুন।" fails) |
+| 40 | wrong → good | fixed introduction instead of "I am Qasim" |
+| 30, 36 | good → good | the fixed scope message and introduction, instead of the model's own reply |
+| 6 | wrong → good | the relevance floor removed two weak passages; it declined instead of producing repetitive text |
+| 8 | needless refusal → caught | Bukhari 1 is now retrieved and quoted correctly, but the model cited `[quran:9:37]`/`[bukhari:2195]` |
+| 11 | caught → hidden by mistake | all 4 ayat of al-Ikhlas are now retrieved and the text is right, but it cited them as `[1]`, `[2]` |
+| 2 | hidden by mistake → caught | footnote marks are gone; the quote now fails for a real reason (a template word, "মুদ্রিত", inside the verse) |
+| 4 | hidden by mistake → caught | the second quote is from Muslim 6593 but was cited to Tirmidhi 1934 |
+| 16 | hidden by mistake → weak | now cited properly; gives the nisab from the translator's note but not the 2.5% rate |
+| 19 | needless refusal → weak | quotes Tirmidhi 252 correctly in Bangla, but opens with the grading line |
+| 21, 23 | weak → good | 23 now says "I'm not sure" to "cleanliness is next to godliness" |
+| 5 | caught → **wrong** | now passes: junk prefix "সাহিত্যের উত্তর: মুদ্রিত কপি:" plus a hadith about fasting in *Muharram* for a question about Ramadan |
+| 17 | needless refusal → **wrong** | now answers, but from Muslim 1549, a hadith about *qunut*: "raised his hands before ruku', not after". Passes, because no quote is checked and the vocabulary overlaps |
+
+Still wrong: #20 (inheritance verse for "honouring parents"), #38 ("الوضوء هو نظيف" citing 93:1, warn),
+#39 (riba → 6:19, 2:143, 27:40, pass).
+
+Fatiha set: Q3 and Q7 are still good, and Q1, Q2, Q4 and Q6 are still weak. Q5 (Bangla "…ফরজ?") went
+from caught to **wrong**: it now passes with a garbled sentence citing Tirmidhi 1027, which is about
+reciting al-Fatiha at a *funeral* prayer.
+
+### MIN_RELEVANCE: the threshold can't do this job with E5-small
+
+`python -m tools.calibrate_relevance`:
+
+```
+on topic  (270 pairs): p5=0.796 p25=0.827 p50=0.848 p75=0.865 p95=0.891
+off topic (330 pairs): p5=0.758 p25=0.788 p50=0.803 p75=0.821 p95=0.848
+suggested MIN_RELEVANCE=0.796: keeps 95% of on-topic pairs, removes 38% of off-topic pairs
+```
+
+The two distributions overlap almost completely. Checked by eye on the probe questions:
+
+| question | passage | similarity | about the question? |
+|---|---|---|---|
+| riba intrest | quran:6:19 / 2:143 / 27:40 | 0.858 / 0.858 / 0.857 | no |
+| riba intrest | **quran:2:275** (the riba verse) | **0.832** | yes |
+| honouring parents | quran:4:11 (inheritance) | 0.852 | no |
+| honouring parents | **quran:17:23** | **0.834** | yes |
+| Is al-Fatiha mandatory | quran:3:30 | 0.841 | no |
+| weather in Dhaka | bukhari:3258 | 0.806 | no |
+| Python sort | quran:68:1 | 0.801 | no |
+
+The wrong citations score *higher* than the right ones, and off-topic questions' passages clear the floor.
+Removing the question's framing ("what does the Quran say about") doesn't change that: "riba interest"
+alone still ranks 2:275 (0.771) below 6:19 (0.797). E5-small similarity is good enough to *find*
+candidates but not to judge relevance. 0.796 is harmless (it keeps 95% of real matches) and occasionally
+helps (#6), but it caught none of the off-topic citations and only one off-topic question (Bangla
+"capital of Bangladesh"). Fix 1 needs a **cross-encoder reranker** (e.g. `bge-reranker-v2-m3`,
+multilingual, ~570 M parameters) or an LLM relevance judgement, not a cosine threshold.
+
+### Misfires found and fixed
+
+1. **A named surah was handed over whole even when the question is *about* it.** "Is Surah al-Fatiha
+   mandatory in every prayer?" got all 7 ayat of al-Fatiha as top sources (relevance 1.0, so exempt from
+   the off-topic check), although they don't answer it. Now a short surah is given whole only when the
+   question asks for its text (show, recite, quote, what does it say, meaning, tafsir; or little more
+   than the name). Test: `test_a_question_about_a_surah_doesnt_pull_in_its_text`.
+2. **A short quote shifted the quote marks** (an older checker bug). The quote pattern required 12+
+   characters, so in `asked, "Are you married?" Sa'id replied, "No." Ibn 'Abbas said, "Marry…"` the closing
+   mark of "No." paired with the opening mark of "Marry" and *Ibn 'Abbas said,* was checked as a quote, so a
+   correct answer (q-en-09, Bukhari 5069) failed as a misquote. Now every quote is matched and short ones
+   are skipped. Test: `test_short_quote_does_not_shift_the_quote_marks`.
+
+No good answer was hidden by the new rules (`misattributed`, `mixed_language`, `repetition`,
+`no_citations`). In the 98-question run, the only new-rule failure was an Arabic question answered
+entirely in Bangla, which is correct to fail.
+
+### New problems seen
+
+- **Bangla words corrupted inside quotes.** "যারা সুদ খা Hague তারা…" (2:275), "বৃদ্ধ হওthouse" (15:54): Latin
+  fragments inserted mid-word. The checker catches these as misquotes (7 of the 18 failures are in Bangla, mostly
+  quotes like this). Cause: training (fix 4).
+- **A claim pinned on the wrong hadith, with no quote to check** (#17 qunut, Fatiha Q5 funeral prayer).
+  The vocabulary-overlap check passes them. Needs the same reranker or entailment check as fix 1.
+- **Wrong citation markers on right text** (#8, #11): the model writes `[1]` or copies a neighbouring
+  source's marker. Cause: training; the templates should include multi-ayah and named-hadith lookups.
+
+### Updated priorities
+
+1. Reranker for relevance (fix 1): would catch #20, #39, #17 and Fatiha Q5.
+2. Retrain shorter with varied, multi-source templates (fixes 4, 6): Bangla corruption, `[1]` markers,
+   junk prefixes.
+3. Reviewed ruling and disputed-issue examples (fix 5).
+4. Bangla retrieval (fix 9).

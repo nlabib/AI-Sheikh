@@ -36,8 +36,17 @@ def test_short_surahs_by_name_or_number_are_given_whole():
     assert find_explicit_refs("Show me Surah Al-Ikhlas.") == ikhlas
     assert find_explicit_refs("surah 112") == ikhlas
     assert find_explicit_refs("সূরা ১১২") == ikhlas
-    assert len(find_explicit_refs("is surah fathia mandatory in every prayer")) == 7  # typo, Al-Faatiha
+    assert len(find_explicit_refs("recite surah fathia")) == 7  # typo, Al-Faatiha
+    assert len(find_explicit_refs("What does Surah al-Asr say?")) == 3
     assert len(find_explicit_refs("surah ikhlas and surah nas")) == 10
     assert find_explicit_refs("surah al-baqarah") == []  # too long to hand over whole
     assert find_explicit_refs("which surah talks about patience") == []
     assert find_explicit_refs("surah 2:255") == ["quran:2:255"]
+
+
+def test_a_question_about_a_surah_doesnt_pull_in_its_text():
+    # The ayat of al-Fatiha don't answer whether it's obligatory; the hadith search finds what does.
+    assert find_explicit_refs("is surah fathia mandatory in every prayer") == []
+    assert find_explicit_refs("Is Surah al-Fatiha mandatory in every prayer?") == []
+    assert find_explicit_refs("When was surah 112 revealed and why is it called al-Ikhlas?") == []
+    assert find_explicit_refs("Is Surah al-Fatiha mandatory? Bukhari 756") == ["bukhari:756"]

@@ -114,6 +114,14 @@ def test_malformed_marker_flagged(store):
     assert "malformed_marker" in kinds(report)
 
 
+def test_short_quote_does_not_shift_the_quote_marks(store):
+    # "Can I?" is too short to check; its closing mark must not pair with the next opening one and turn
+    # ' and the verse answers ' into a "misquote".
+    answer = 'People ask "Can I?" and the verse answers "There is no compulsion in religion." [quran:2:256]'
+    report = check_answer(answer, EVIDENCE, store)
+    assert report.status == "pass", report.to_dict()
+
+
 def test_quoted_sentence_with_period_inside_is_not_split(store):
     answer = '"Allah! There is no deity save Him, the Alive, the Eternal. Neither slumber nor sleep overtaketh Him." [quran:2:255]'
     assert check_answer(answer, EVIDENCE, store).status == "pass"

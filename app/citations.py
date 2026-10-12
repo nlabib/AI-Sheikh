@@ -23,7 +23,11 @@ from app.refs import MARKER, expand_marker, find_markers
 from app.store import Store
 from app.text import normalize, strip_footnotes, tokenize
 
-_QUOTE = re.compile(r"[\"“«]([^\"”»]{12,}?)[\"”»]")
+# Every quoted stretch, however short, so that quote marks pair up correctly: with a minimum length here, the
+# closing mark of a short quote ("No.") would pair with the next opening mark and the narration between them
+# would be checked as a quote. Short quotes are skipped when verifying (MIN_QUOTE_CHARS).
+_QUOTE = re.compile(r"[\"“«]([^\"”»]+?)[\"”»]")
+MIN_QUOTE_CHARS = 12
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?।؟])\s+|\n+")
 # Sentences like these do not need a source.
 _EXEMPT = re.compile(
@@ -196,6 +200,8 @@ def check_answer(answer: str, evidence_refs: list[str], store: Store, min_overla
             issues.append(Issue("misattributed", problem, sentence))
         verified_quote = False
         for quote in _QUOTE.findall(sentence):
+            if len(quote.strip()) < MIN_QUOTE_CHARS:
+                continue
             if _quote_found(quote, texts):
                 verified_quote = True
             else:

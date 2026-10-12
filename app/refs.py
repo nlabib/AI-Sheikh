@@ -48,6 +48,21 @@ _FILLER = r"(?:\s*(?:hadith|hadees|hadis|number|num|no\.?|nr\.?|#|নং|নম�
 _SURAH_WORD = r"(?:surah|sura|surat|soorah|সূরা|সুরা|سوره|سورة)"
 # Surahs this short are given whole when named; longer ones are left to ordinary search.
 WHOLE_SURAH_MAX_AYAT = 12
+# A named surah is handed over whole only when the question asks for its text ("show me", "recite", "what does
+# it say", its meaning), or is little more than the name. "Is Surah al-Fatiha obligatory in every prayer?" is
+# about the surah, and its seven ayat don't answer it; ordinary search should find the hadith that do.
+_ASKS_FOR_TEXT = re.compile(
+    r"\b(?:show|recite|read|quote|text|says?|said|translat\w*|mean\w*|tafsir|explain|words|full|whole)\b"
+    r"|দেখাও|পড়|পাঠ|তেলাওয়াত|অর্থ|অনুবাদ|কী বলা|কি বলা|ব্যাখ্যা"
+    r"|نص|اقر|اعرض|معن|تفسير|ماذا تقول|ماذا يقول")
+_CONNECTORS = {"and", "&", "or", "و", "এবং", "ও"}
+
+
+def _asks_for_surah_text(q: str) -> bool:
+    if _ASKS_FOR_TEXT.search(q):
+        return True
+    words = [w for w in re.findall(r"[\w'-]+", q) if not re.fullmatch(_SURAH_WORD, w) and w not in _CONNECTORS]
+    return len(words) <= 3  # "Surah Ikhlas", "surah ikhlas and surah nas", "سورة الإخلاص"
 
 
 def _fold_name(name: str) -> str:
@@ -129,17 +144,18 @@ def find_explicit_refs(query: str) -> list[str]:
     for s, a in re.findall(r"\b(\d{1,3})\s*[:/]\s*(\d{1,3})\b", q):
         if 1 <= int(s) <= 114:
             found.append(quran_ref(int(s), int(a)))
-    for num in re.findall(_SURAH_WORD + r"\s*(?:no\.?|number|#|নং)?\s*(\d{1,3})\b(?!\s*[:/]\s*\d)", q):
-        found += surah_refs(int(num))
-    for m in re.finditer(_SURAH_WORD + r"\s+(?=((?:[a-z']+[-\s]?){1,3}))", q):
-        words = re.split(r"\s+", m.group(1).strip())
-        for n in (2, 1, 3):  # "al ikhlas" before "al", then "aal-i-imraan"-style names
-            name = _fold_name(" ".join(words[:n]))
-            close = get_close_matches(name, _SURAH_BY_NAME, n=1, cutoff=0.85) if len(name) >= 5 else []
-            num = _SURAH_BY_NAME.get(name) or (_SURAH_BY_NAME[close[0]] if close else None)
-            if num:
-                found += surah_refs(num)
-                break
+    if _asks_for_surah_text(q):
+        for num in re.findall(_SURAH_WORD + r"\s*(?:no\.?|number|#|নং)?\s*(\d{1,3})\b(?!\s*[:/]\s*\d)", q):
+            found += surah_refs(int(num))
+        for m in re.finditer(_SURAH_WORD + r"\s+(?=((?:[a-z']+[-\s]?){1,3}))", q):
+            words = re.split(r"\s+", m.group(1).strip())
+            for n in (2, 1, 3):  # "al ikhlas" before "al", then "aal-i-imraan"-style names
+                name = _fold_name(" ".join(words[:n]))
+                close = get_close_matches(name, _SURAH_BY_NAME, n=1, cutoff=0.85) if len(name) >= 5 else []
+                num = _SURAH_BY_NAME.get(name) or (_SURAH_BY_NAME[close[0]] if close else None)
+                if num:
+                    found += surah_refs(num)
+                    break
     for key, names in _ALIASES.items():
         if key == "quran":
             continue
