@@ -50,3 +50,16 @@ def test_a_question_about_a_surah_doesnt_pull_in_its_text():
     assert find_explicit_refs("Is Surah al-Fatiha mandatory in every prayer?") == []
     assert find_explicit_refs("When was surah 112 revealed and why is it called al-Ikhlas?") == []
     assert find_explicit_refs("Is Surah al-Fatiha mandatory? Bukhari 756") == ["bukhari:756"]
+
+
+def test_surah_names_in_arabic_and_bangla():
+    ikhlas = ["quran:112:1", "quran:112:2", "quran:112:3", "quran:112:4"]
+    assert find_explicit_refs("سورة الإخلاص") == ikhlas
+    assert find_explicit_refs("সূরা ইখলাস") == ikhlas
+    assert len(find_explicit_refs("সূরা আল-ফাতিহা পড়ে শোনাও")) == 7
+    assert find_explicit_refs("সূরা ফাতিহা ছাড়া নামাজ হয় কি?") == []  # about the surah, not its text
+
+
+def test_lettered_muslim_numbers_are_kept_whole():
+    assert find_explicit_refs("Muslim 1907a") == ["muslim:1907a"]
+    assert find_explicit_refs("Bukhari 12a") == ["bukhari:12"]

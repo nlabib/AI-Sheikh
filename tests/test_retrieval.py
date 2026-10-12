@@ -58,3 +58,4 @@ def test_muslim_numbers_also_match_abd_al_baqi_numbering(store):
                           "hadith-en-test", meta={"alt_number": "394a"})])
     hits = Retriever(store).search_balanced("Sahih Muslim 394", k=6, mode="fts")
     assert hits[0].ref == "muslim:874" and "reference" in hits[0].matched_by
+    assert Retriever(store).search_balanced("Muslim 394a", k=6, mode="fts")[0].ref == "muslim:874"
