@@ -44,7 +44,9 @@ _ALIASES = {
 }
 
 # Words people put between a collection name and the number: "Bukhari hadith no. 1", "مسلم حديث رقم ٣٩٤".
-_FILLER = r"(?:\s*(?:hadith|hadees|hadis|number|num|no\.?|nr\.?|#|নং|নম্বর|হাদিস|হাদীস|حديث|رقم)\b\.?)*"
+# The word boundary only goes on the Latin words: Bangla words end in a vowel sign, which \b doesn't count as a
+# word character, so "নং\b" never matches before a space.
+_FILLER = r"(?:\s*(?:(?:hadith|hadees|hadis|number|num|no|nr)\b|#|নং|নম্বর|হাদিস|হাদীস|حديث|رقم)\.?)*"
 _SURAH_WORD = r"(?:surah|sura|surat|soorah|সূরা|সুরা|سوره|سورة)"
 # Surahs this short are given whole when named; longer ones are left to ordinary search.
 WHOLE_SURAH_MAX_AYAT = 12

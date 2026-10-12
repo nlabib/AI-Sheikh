@@ -29,6 +29,8 @@ def test_reference_phrasings_people_use():
     assert find_explicit_refs("What is Sahih Bukhari hadith number 1?") == ["bukhari:1"]
     assert find_explicit_refs("Sunan Abi Dawud 4031") == ["abudawud:4031"]
     assert find_explicit_refs("مسلم حديث رقم ٣٩٤") == ["muslim:394"]
+    assert find_explicit_refs("বুখারী নং ১") == ["bukhari:1"]
+    assert find_explicit_refs("মুসলিম হাদিস নং ৫") == ["muslim:5"]
 
 
 def test_short_surahs_by_name_or_number_are_given_whole():

@@ -103,6 +103,15 @@ def test_bangla_inside_english_answer_fails(store):
     assert "mixed_language" not in kinds(check_answer(answer, EVIDENCE, store))
 
 
+def test_english_answer_to_bangla_or_arabic_question_fails(store):
+    answer = "There is no compulsion in religion [quran:2:256]."
+    for lang in ("bn", "ar"):
+        assert "mixed_language" in kinds(check_answer(answer, EVIDENCE, store, question_lang=lang))
+    # A book name in English inside a Bangla answer is fine.
+    from app.citations import _foreign_letters
+    assert _foreign_letters("ধর্মে কোনো জবরদস্তি নেই, Sahih Muslim [quran:2:256]।", "bn") == 0
+
+
 def test_not_sure_followed_by_a_guess_is_not_a_decline(store):
     answer = "I'm not sure. The Quran requires every Muslim to pay zakat on all jewellery every single year."
     report = check_answer(answer, EVIDENCE, store)
