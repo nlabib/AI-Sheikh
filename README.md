@@ -88,7 +88,11 @@ Environment variables (see `app/config.py`): `LM_BASE_URL` (default
 `EMBEDDER` (`e5` or `hashing`), `DB_PATH`, `INDEX_DIR`, `TOP_K`, `STRICT_CITATIONS`
 (default `1`: answers that fail the citation check are replaced with "I'm not sure"), `MIN_RELEVANCE`
 (default `0`, off: the E5 similarity below which a passage counts as off topic; pick it with
-`python -m tools.calibrate_relevance`).
+`python -m tools.calibrate_relevance`), `RERANKER` (default empty, off; `BAAI/bge-reranker-v2-m3`, a ~2.3 GB
+download, rereads each candidate passage with the question and reorders them; scoped recall@5 0.684 → 0.827,
+about 0.7 s per question on a GPU), `RERANK_MIN` (the reranker's 0-1 score below which a passage counts as
+off topic, used instead of `MIN_RELEVANCE` when `RERANKER` is set; 0.01 worked well, see
+`docs/INFERENCE_REVIEW.md`) and `RERANK_POOL` (candidates per side handed to the reranker, default 30).
 
 ## Sources and licences
 

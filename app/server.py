@@ -19,6 +19,7 @@ from app.config import get_settings
 from app.embed import VectorIndex, make_embedder
 from app.llm import ChatClient, LLMError
 from app.prompts import INTRO, NO_SOURCES, NOT_SURE, SALAM_REPLY, build_messages
+from app.rerank import make_reranker
 from app.retrieve import Retriever
 from app.store import Store
 from app.text import detect_lang
@@ -26,15 +27,20 @@ from app.text import detect_lang
 
 def build_retriever(settings) -> tuple[Retriever, str]:
     store = Store(settings.db_path)
+    reranker = make_reranker(settings.reranker)
+    rerank_note = f", reranked by {settings.reranker}" if reranker else ""
     index = VectorIndex.load(settings.index_dir)
     if index is None:
-        return Retriever(store), "fts only (no vector index; run `python -m tools.index`)"
+        return (Retriever(store, reranker=reranker, rerank_pool=settings.rerank_pool),
+                f"fts only (no vector index; run `python -m tools.index`){rerank_note}")
     embedder_kind = "hashing" if index.embedder_name.startswith("hashing") else "e5"
     if embedder_kind == "hashing" and settings.embedder != "hashing":
         # The hashing fallback makes hybrid results worse than FTS alone (docs/RESULTS.md).
-        return Retriever(store), "fts only (ignoring hashing index; set EMBEDDER=hashing to use it)"
+        return (Retriever(store, reranker=reranker, rerank_pool=settings.rerank_pool),
+                f"fts only (ignoring hashing index; set EMBEDDER=hashing to use it){rerank_note}")
     embedder = make_embedder(embedder_kind, index.embedder_name if embedder_kind == "e5" else "")
-    return Retriever(store, embedder, index), f"hybrid (fts + {index.embedder_name})"
+    return (Retriever(store, embedder, index, reranker=reranker, rerank_pool=settings.rerank_pool),
+            f"hybrid (fts + {index.embedder_name}){rerank_note}")
 
 
 @asynccontextmanager
@@ -46,7 +52,7 @@ async def lifespan(app: FastAPI):
         app.state.llm = ChatClient(settings)
     app.state.top_k = settings.top_k
     app.state.strict = getattr(app.state, "strict", settings.strict_citations)
-    app.state.min_relevance = getattr(app.state, "min_relevance", settings.min_relevance)
+    app.state.min_relevance = getattr(app.state, "min_relevance", settings.relevance_floor)
     yield
 
 
@@ -116,15 +122,22 @@ def answer_question(retriever: Retriever, llm, question: str, k: int, collection
                     mode: str = "hybrid", strict: bool = True, min_relevance: float = 0.0) -> dict:
     """The whole /ask pipeline: retrieve, drop passages that aren't about the question, ask the model,
     check its citations, and replace a failing answer with "I'm not sure". tools.eval_answers uses it too,
-    so evaluation sees exactly what a user sees."""
+    so evaluation sees exactly what a user sees.
+
+    min_relevance is the floor for the relevance score in use: the reranker's (0-1) when the retriever has
+    one, otherwise E5 similarity."""
     lang = detect_lang(question)
     intro = small_talk_reply(question)
     if intro:
         return {"question": question, "sources": [], "answer": intro,
                 "citation_check": {"status": "pass", "cited": [], "issues": []}}
     mode = mode if (mode != "vector" or retriever.index is not None) else "fts"
-    hits = retriever.search_balanced(question, k=k, mode=mode, collections=collections)
-    relevance = retriever.relevance(question, [h.ref for h in hits])
+    hits = retriever.search_balanced(question, k=k, mode=mode, collections=collections,
+                                     min_rerank=min_relevance if retriever.reranker is not None else 0.0)
+    if retriever.reranker is not None:
+        relevance = {h.ref: h.rerank for h in hits if h.rerank is not None}
+    else:
+        relevance = retriever.relevance(question, [h.ref for h in hits])
     for h in hits:
         if "reference" in h.matched_by:
             relevance[h.ref] = 1.0  # the user asked for it by number

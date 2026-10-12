@@ -12,11 +12,14 @@ from itertools import zip_longest
 import numpy as np
 
 from app.embed import Embedder, VectorIndex
+from app.rerank import Reranker
 from app.refs import HADITH_COLLECTIONS, find_explicit_refs, parse_ref
 from app.store import Passage, Store
-from app.text import detect_lang
+from app.text import detect_lang, strip_footnotes
 
 RRF_K = 60
+# Candidates per side handed to the reranker (when one is configured); it reorders them and keeps the best k.
+RERANK_POOL = 30
 
 
 @dataclass
@@ -25,6 +28,7 @@ class Hit:
     score: float
     matched_by: list[str] = field(default_factory=list)
     passages: list[Passage] = field(default_factory=list)
+    rerank: float | None = None  # cross-encoder relevance to the question, 0-1, when a reranker is set
 
     @property
     def label(self) -> str:
@@ -49,6 +53,7 @@ class Hit:
             "label": self.label,
             "score": round(self.score, 5),
             "matched_by": self.matched_by,
+            "rerank": None if self.rerank is None else round(self.rerank, 4),
             "meta": meta,
             "texts": [
                 {"lang": p.lang, "edition": p.edition, "source_id": p.source_id, "text": p.text}
@@ -58,8 +63,11 @@ class Hit:
 
 
 class Retriever:
-    def __init__(self, store: Store, embedder: Embedder | None = None, index: VectorIndex | None = None):
+    def __init__(self, store: Store, embedder: Embedder | None = None, index: VectorIndex | None = None,
+                 reranker: Reranker | None = None, rerank_pool: int = RERANK_POOL):
         self.store = store
+        self.reranker = reranker
+        self.rerank_pool = rerank_pool
         self.embedder = embedder
         self.index = index if (index is not None and embedder is not None) else None
         self._row_collection = None
@@ -75,8 +83,9 @@ class Retriever:
         return np.isin(self._row_collection, collections)
 
     def search(self, query: str, k: int = 6, mode: str = "hybrid", collections: list[str] | None = None,
-               pool: int = 100) -> list[Hit]:
-        """mode: "fts", "vector" or "hybrid"."""
+               pool: int = 100, rerank: bool = True) -> list[Hit]:
+        """mode: "fts", "vector" or "hybrid". With a reranker (and rerank=True), the top rerank_pool
+        candidates are scored by it and the best k kept."""
         ranked: dict[str, list[int]] = {}
         if mode in ("fts", "hybrid"):
             ranked["fts"] = [pid for pid, _ in self.store.fts_search(query, limit=pool, collections=collections)]
@@ -111,23 +120,38 @@ class Retriever:
             scores[ref] = 2.0 - i / 1000 + scores.get(ref, 0.0) / 1000
             matched.setdefault(ref, set()).add("reference")
 
-        top = sorted(scores, key=scores.get, reverse=True)[:max(k, len(explicit))]
-        return [Hit(ref, scores[ref], sorted(matched[ref]), self._ordered(ref, query)) for ref in top]
+        use_reranker = self.reranker is not None and rerank
+        n = max(k, self.rerank_pool) if use_reranker else k
+        top = sorted(scores, key=scores.get, reverse=True)[:max(n, len(explicit))]
+        hits = [Hit(ref, scores[ref], sorted(matched[ref]), self._ordered(ref, query)) for ref in top]
+        if use_reranker:
+            hits = self._rerank(query, hits)
+        return hits[:max(k, len(explicit))]
 
     def search_balanced(self, query: str, k: int = 6, mode: str = "hybrid",
-                        collections: list[str] | None = None) -> list[Hit]:
+                        collections: list[str] | None = None, min_rerank: float = 0.0) -> list[Hit]:
         """Evidence for answering: the best Quran passages and the best hadith, interleaved.
 
         Hadith outnumber ayat by about three to one in the corpus, so an unscoped
         search tends to crowd the Quran out. Searching each side separately keeps
         both in front of the model. Explicitly typed references stay first.
+
+        With a reranker, each side is ordered by its score and passages below min_rerank are left out, so a
+        side with nothing about the question gives its places to the other. The sides are still interleaved
+        rather than ranked together: Pickthall's 1930 English scores low against modern wording ("interest",
+        "patience"), and a single ranking pushed the Quran out of Quran questions.
         """
         hadith = [c for c in HADITH_COLLECTIONS if not collections or c in collections]
-        sides = []
+        sides: list[list[Hit]] = []
+        # With a floor, fetch more per side so that what survives it can still fill k.
+        per_side = 2 * k if (self.reranker is not None and min_rerank > 0) else k
         if not collections or "quran" in collections:
-            sides.append(self.search(query, k=k, mode=mode, collections=["quran"]))
+            sides.append(self.search(query, k=per_side, mode=mode, collections=["quran"]))
         if hadith:
-            sides.append(self.search(query, k=k, mode=mode, collections=hadith))
+            sides.append(self.search(query, k=per_side, mode=mode, collections=hadith))
+        if self.reranker is not None and min_rerank > 0:
+            sides = [[h for h in side if "reference" in h.matched_by or (h.rerank or 0.0) >= min_rerank]
+                     for side in sides]
         explicit = [h for side in sides for h in side if "reference" in h.matched_by]
         explicit.sort(key=lambda h: -h.score)
         seen = {h.ref for h in explicit}
@@ -163,6 +187,29 @@ class Retriever:
             if rows:
                 out[ref] = float(np.max(self.index.vectors[rows] @ qv))
         return out
+
+    def rerank_scores(self, query: str, refs: list[str]) -> dict[str, float]:
+        """The reranker's relevance score for each ref: the best over its editions (Arabic, English, Bangla),
+        since an archaic translation can hide a match the other editions show. Empty without a reranker."""
+        if self.reranker is None or not refs:
+            return {}
+        owners, texts = [], []
+        for ref in dict.fromkeys(refs):
+            for p in self.store.by_ref(ref):
+                owners.append(ref)
+                texts.append(strip_footnotes(p.text))
+        out: dict[str, float] = {}
+        for ref, s in zip(owners, self.reranker.score(query, texts)):
+            out[ref] = max(out.get(ref, 0.0), s)
+        return out
+
+    def _rerank(self, query: str, hits: list[Hit]) -> list[Hit]:
+        """Order hits by reranker score, explicitly typed references first as always."""
+        scores = self.rerank_scores(query, [h.ref for h in hits])
+        for h in hits:
+            h.rerank = scores.get(h.ref, 0.0)
+        explicit = [h for h in hits if "reference" in h.matched_by]
+        return explicit + sorted((h for h in hits if "reference" not in h.matched_by), key=lambda h: -h.rerank)
 
     def _ordered(self, ref: str, query: str) -> list[Passage]:
         """All editions of a ref: the question's language first, then Arabic, then the rest."""

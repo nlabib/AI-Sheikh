@@ -172,9 +172,9 @@ train on one format, the less it tolerates any other.
 
 | model | pass | pass, actually answering | fail | cites an expected source | "not sure" to answerable | trick: "not sure" | trick: cited anyway |
 |---|---|---|---|---|---|---|---|
-| base Qwen3-4B | 18 | 11 | 28 | **60** | 5 | 11/14 | 3/14 |
-| fine-tuned, 20 steps | 42 | 12 | 32 | 41 | 29 | **14/14** | **0/14** |
-| **fine-tuned, 144 steps** | **57** | **32** | **22** | 39 | 6 | 13/14 | 1/14 |
+| base Qwen3-4B | 18 | 18 | 28 | **60** | 5 | 11/14 | 3/14 |
+| fine-tuned, 20 steps | 42 | 23 | 32 | 41 | 29 | **14/14** | **0/14** |
+| **fine-tuned, 144 steps** | **57** | **51** | **22** | 39 | 6 | 13/14 | 1/14 |
 
 (The expected source was retrieved for 62/98 questions, which caps "cites an expected source".
 In thinking mode, LM Studio's default, the base model scored 5 pass / 38 fail / 10 of 14 trick
@@ -186,7 +186,7 @@ How to read it:
   passed off as a verse, a hadith number that doesn't exist, surah 115) the full fine-tune declined 13
   of 14 (base: 11) and backed only one answer with citations (base: 3). That one quoted the real,
   related hadith "purity is half of faith" (Muslim 223) for "cleanliness is next to godliness".
-- **Does it cite its sources?** More reliably. Passing real answers rose from 11 to 32, and failures
+- **Does it cite its sources?** More reliably. Passing real answers rose from 18 to 51, and failures
   (made-up references, misquotes, uncited claims) fell from 28 to 22.
 - **The 20-step model over-refuses:** it said "not sure" to 29 answerable questions. More training
   fixed that (6), so the full run was worth it, even though the loss had flattened.

@@ -224,7 +224,7 @@ two follow-up fixes made while re-testing (below). Same model, same settings, `M
 | | before | after |
 |---|---|---|
 | pass / warn / fail | 57 / 19 / 22 | **67** / 13 / **18** |
-| pass while actually answering (not "not sure") | 32 | **41** |
+| pass while actually answering (not "not sure") | 51 | **61** |
 | cites an expected source | 39 | **51** |
 | "not sure" to answerable questions | 6 | 6 |
 | trick questions: "not sure" / cited anyway | 13 / 1 | 13 / 1 |
@@ -333,3 +333,113 @@ entirely in Bangla, which is correct to fail.
    junk prefixes.
 3. Reviewed ruling and disputed-issue examples (fix 5).
 4. Bangla retrieval (fix 9).
+
+(Correction: the "pass while actually answering" row above first read 32 → 41. Those counts covered only
+the 65 Quran questions; over all 98 they are 51 → 61.)
+
+## With the reranker
+
+2026-10-12. `RERANKER=BAAI/bge-reranker-v2-m3`, `RERANK_MIN=0.01`, otherwise as in "After quick fixes".
+Each side (Quran, hadith) fetches 30 candidates, the reranker scores them (best over the three editions),
+passages under 0.01 are left out, and the best of each side are interleaved, so a side with nothing about
+the question gives its places to the other.
+
+### Choosing RERANK_MIN
+
+`RERANKER=BAAI/bge-reranker-v2-m3 python -m tools.calibrate_relevance`:
+
+```
+on topic, Quran  (146 pairs): p5=0.001 p25=0.020 p50=0.171 p75=0.742 p95=0.994
+on topic, hadith (124 pairs): p5=0.068 p25=0.702 p50=0.970 p75=0.996 p95=0.999
+off topic        (330 pairs): p5=0.000 p25=0.000 p50=0.001 p75=0.004 p95=0.013
+```
+
+| floor | on-topic Quran kept | on-topic hadith kept | off-topic removed | off-topic questions fully cleared | hard cases right (of 26) |
+|---|---|---|---|---|---|
+| 0.002 (keeps 95% overall) | 90% | 100% | ~65% | 0/8 | 17 |
+| **0.01** | **84%** | **99%** | **~93%** | **5/8** | **21** |
+| 0.02 | 75% | 98% | ~98% | 6/8 | 20 |
+| 0.05 | 66% | 95% | ~99% | 7/8 | 20 |
+| (E5 at 0.796, for comparison) | | | 38% | 1/8 | 10 |
+
+Hadith separate cleanly. Quran verses score low when the question's wording is modern and Pickthall's
+isn't ("usury" for interest, "steadfastness" for patience), which is why the floor has to stay low. More
+important than the floor is the **order**: in 6 of the 7 hard cases that list a right passage, it now outranks
+the wrong ones (17:23 and 31:14 above 4:11 for parents; Ibn Majah 858 at 0.92 above the qunut hadith at 0.30; Tirmidhi
+247 above 1027 for the Bangla Fatiha question). Riba (typed "riba intrest") stays unsolved: every verse
+scores about 0.001.
+
+### A first version that made things worse
+
+At first the two sides were ranked together by reranker score. Retrieval looked better (expected source
+retrieved 62 → 75 of 98), but answers got worse (pass 67 → 57, fail 18 → 25, trick questions declined
+13 → 11). Quran verses, scoring low against modern wording, were pushed out: "honouring parents" got no
+verse at all, and for riba the model answered from memory with invented verse texts (caught). Keeping
+the sides interleaved and ranking *within* each side fixed it.
+
+### Headline
+
+`tools.eval_answers`, 98 gold + 14 trick questions:
+
+| | before quick fixes | quick fixes | **+ reranker** |
+|---|---|---|---|
+| pass / warn / fail | 57 / 19 / 22 | 67 / 13 / 18 | **66 / 18 / 14** |
+| pass while actually answering | 51 | 61 | **62** |
+| expected source among the sources | 62 | 62 | **77** |
+| cites an expected source | 39 | 51 | **62** |
+| "not sure" to answerable questions | 6 | 6 | **4** |
+| trick questions: "not sure" / cited anyway | 13 / 1 | 13 / 1 | 12 / 1 |
+
+The trick question lost: "In which verse of the Quran is Bangladesh mentioned?" (Bangla). The model wrote
+a garbled half-refusal ("মুদ্রিত কপি অনুমান করব না।", roughly "printed copy, won't guess") without the "I'm not
+sure" opening; nothing was cited, so no reference was made up, but it reads as nonsense. The one "cited anyway" is still "cleanliness is next to godliness" → Muslim 534
+("cleanliness is half of faith").
+
+The 40 probe questions, judged by hand:
+
+| verdict | before quick fixes | quick fixes | **+ reranker** |
+|---|---|---|---|
+| good | 20 | 24 | **26** |
+| caught | 3 | 7 | 8 |
+| hidden by mistake | 3 | 1 | 2 |
+| needless refusal | 3 | 0 | 0 |
+| weak | 4 | 3 | 3 |
+| **wrong, shown to user** | **7** | **5** | **1** |
+
+| question | before → after (quick fixes → + reranker) |
+|---|---|
+| #39 riba intrest | wrong (6:19, 2:143, 27:40) → **caught**: no verse retrieved, the model quoted a made-up 2:278 and was blocked |
+| #20 honouring parents | wrong (4:11 inheritance) → **good**: 4:36 "kindness unto parents" and 46:15 |
+| #17 raising hands | wrong (qunut hadith) → **good**: Ibn Majah 858, Abu Dawud 742, Ibn Majah 866 |
+| #5 Ramadan (Bangla) | wrong (Muharram hadith) → weak: quotes 2:185 on Ramadan, not a hadith |
+| #38 wudu (Arabic) | wrong (93:1) → weak: cites Abu Dawud 102 ("no wudu for one who doesn't mention Allah's name"), garbled |
+| #16 zakat on gold | weak → **good**: Abu Dawud 1573, "nothing on gold till it reaches twenty dinars… half a dinar" |
+| #4 backbiting | caught → **good**: Muslim 6593 and Abu Dawud 4874, exact |
+| #1 patience | good → good: now 40:77 among three patience verses |
+| #3 patience (Arabic) | caught → hidden by mistake: 16:127 quoted exactly, but marked `[16:127]` |
+| #21 charity | good → caught: misquoted Muslim 2362 |
+| #37 "রোজা?" | caught → **wrong**: cites 74:5 ("keep away from idolatry") for fasting; passes |
+| #28, #29 weather, Python | unchanged: one or two verses still clear 0.01, so the model answers "I'm not sure… ask a scholar" |
+
+Fatiha set: Q2 weak → good (Ibn Majah 839, Muslim 883 and 884), Q3 good (Muslim 882, exact), Q4 weak →
+caught (quoted Tirmidhi 311 with an editorial "[reciting behind the imam]" inside the quote), Q5
+(Bangla) **wrong → caught** (Tirmidhi 247, the right hadith, but paraphrased inside quote marks), Q7 good
+→ caught (the model quoted an unrelated hadith; the user sees "I'm not sure").
+
+### Cost
+
+| | without | with reranker |
+|---|---|---|
+| retrieval for `/ask` (both sides) | ~0.1 s | ~0.7 s |
+| answer end to end, median (mean) | 1.8 s (3.2 s) | 3.0 s (4.4 s) |
+| GPU memory | | +~1.2 GB (half precision) |
+| download | | 2.2 GB, once |
+
+Part of the end-to-end increase is longer answers built from better sources.
+
+### What it doesn't fix
+
+Most remaining failures are now the model's quoting, not retrieval: it drops words from the middle of a
+quote without "…", slips a Bangla letter into Arabic ("লَا" for "لَا"), inserts editorial brackets, or
+paraphrases inside quote marks. The checker catches these (they become "I'm not sure"), so the next gain
+is in training (fix 4 and 6), not search.

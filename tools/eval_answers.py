@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
           f"{len(gold)} answerable + {len(trick)} unanswerable questions")
 
     rows, status = [], Counter()
-    floor = settings.min_relevance
+    floor = settings.relevance_floor
     for item in gold:
         response, answer, report = ask(retriever, llm, item["query"], args.k, floor)
         cites_expected = bool(set(report["cited"]) & set(item["relevant"]))

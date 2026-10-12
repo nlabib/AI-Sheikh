@@ -3,6 +3,7 @@
     python -m tools.evaluate                       # every mode available (fts, plus vector/hybrid if indexed)
     python -m tools.evaluate --modes fts --k 1 5 10
     python -m tools.evaluate --gold data/eval/gold.jsonl --out results/retrieval.json
+    RERANKER=BAAI/bge-reranker-v2-m3 python -m tools.evaluate --modes hybrid   # adds "hybrid+rerank" rows
 
 For each question, a hit counts if ANY of its relevant refs appears in the top k.
 Each mode runs twice: over the whole corpus, and "+scoped" to the question's
@@ -23,6 +24,7 @@ from pathlib import Path
 from app.config import ROOT, get_settings
 from app.embed import VectorIndex, make_embedder
 from app.refs import HADITH_COLLECTIONS
+from app.rerank import make_reranker
 from app.retrieve import Retriever
 from app.store import Store
 
@@ -36,14 +38,15 @@ def load_gold(path: Path) -> list[dict]:
 HADITH = list(HADITH_COLLECTIONS)
 
 
-def evaluate(retriever: Retriever, gold: list[dict], mode: str, ks: list[int], scoped: bool = False) -> dict:
+def evaluate(retriever: Retriever, gold: list[dict], mode: str, ks: list[int], scoped: bool = False,
+             rerank: bool = False) -> dict:
     max_k = max(max(ks), 10)
     groups: dict[str, list[dict]] = defaultdict(list)
     misses = []
     t0 = time.perf_counter()
     for item in gold:
         scope = (["quran"] if item["type"] == "quran" else HADITH) if scoped else None
-        refs = [h.ref for h in retriever.search(item["query"], k=max_k, mode=mode, collections=scope)]
+        refs = [h.ref for h in retriever.search(item["query"], k=max_k, mode=mode, collections=scope, rerank=rerank)]
         relevant = set(item["relevant"])
         rank = next((i + 1 for i, r in enumerate(refs) if r in relevant), None)
         row = {"rank": rank}
@@ -63,7 +66,7 @@ def evaluate(retriever: Retriever, gold: list[dict], mode: str, ks: list[int], s
         return out
 
     return {
-        "mode": mode + ("+scoped" if scoped else ""),
+        "mode": mode + ("+rerank" if rerank else "") + ("+scoped" if scoped else ""),
         "ms_per_query": round(1000 * elapsed / len(gold), 1),
         "groups": {g: summarise(rows) for g, rows in sorted(groups.items())},
         "misses": misses,
@@ -97,13 +100,17 @@ def main(argv: list[str] | None = None) -> int:
     if index is not None:
         kind = "hashing" if index.embedder_name.startswith("hashing") else "e5"
         embedder = make_embedder(kind, index.embedder_name)
-    retriever = Retriever(store, embedder, index)
+    reranker = make_reranker(settings.reranker)
+    retriever = Retriever(store, embedder, index, reranker=reranker, rerank_pool=settings.rerank_pool)
     modes = args.modes or (["fts", "vector", "hybrid"] if index is not None else ["fts"])
 
     gold = load_gold(args.gold)
     print(f"{len(gold)} questions, corpus {store.count()} passages, vector index: "
-          f"{index.embedder_name if index is not None else 'none'}\n")
-    results = [evaluate(retriever, gold, m, args.k, scoped) for scoped in (False, True) for m in modes]
+          f"{index.embedder_name if index is not None else 'none'}, reranker: {settings.reranker or 'none'}\n")
+    # With a reranker, each mode runs with and without it, so the two can be compared.
+    reranks = (False, True) if reranker is not None else (False,)
+    results = [evaluate(retriever, gold, m, args.k, scoped, rr)
+               for scoped in (False, True) for m in modes for rr in reranks]
     print(to_markdown(results, args.k))
     for res in results:
         print(f"\n{res['mode']}: {res['ms_per_query']} ms/query, {len(res['misses'])} questions not in top 5")
@@ -113,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps({"embedder": index.embedder_name if index is not None else None,
-                                        "results": results}, ensure_ascii=False, indent=2), encoding="utf-8")
+                                        "reranker": settings.reranker or None, "results": results}, ensure_ascii=False, indent=2), encoding="utf-8")
     return 0
 
 
