@@ -19,24 +19,22 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from app.citations import check_answer, says_not_sure
+from app.citations import says_not_sure
 from app.config import get_settings
-from app.llm import ChatClient, LLMError
-from app.prompts import build_messages
-from app.server import build_retriever
+from app.llm import ChatClient
+from app.server import answer_question, build_retriever
 from tools.evaluate import DEFAULT_GOLD, load_gold
 
 DEFAULT_UNANSWERABLE = DEFAULT_GOLD.parent / "unanswerable.jsonl"
 
 
-def ask(retriever, llm, query: str, k: int):
-    mode = "hybrid" if retriever.index is not None else "fts"
-    hits = retriever.search_balanced(query, k=k, mode=mode)
-    try:
-        answer = llm.chat(build_messages(query, hits))
-    except LLMError as e:
-        raise SystemExit(f"{e}\nIs LM Studio's server running with a model loaded? See README.")
-    return hits, answer, check_answer(answer, [h.ref for h in hits], retriever.store)
+def ask(retriever, llm, query: str, k: int, min_relevance: float = 0.0):
+    """Returns (response, raw answer, citation report dict), going through the same pipeline as /ask."""
+    response = answer_question(retriever, llm, query, k=k, min_relevance=min_relevance)
+    if response.get("error"):
+        raise SystemExit(f"{response['error']}\nIs LM Studio's server running with a model loaded? See README.")
+    raw = response.get("unverified_answer", response["answer"])
+    return response, raw, response["citation_check"]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -57,28 +55,29 @@ def main(argv: list[str] | None = None) -> int:
           f"{len(gold)} answerable + {len(trick)} unanswerable questions")
 
     rows, status = [], Counter()
+    floor = settings.min_relevance
     for item in gold:
-        hits, answer, report = ask(retriever, llm, item["query"], args.k)
-        cites_expected = bool(set(report.cited) & set(item["relevant"]))
-        retrieved_expected = bool({h.ref for h in hits} & set(item["relevant"]))
+        response, answer, report = ask(retriever, llm, item["query"], args.k, floor)
+        cites_expected = bool(set(report["cited"]) & set(item["relevant"]))
+        retrieved_expected = bool({s["ref"] for s in response["sources"]} & set(item["relevant"]))
         not_sure = says_not_sure(answer)
-        status[report.status] += 1
+        status[report["status"]] += 1
         status["cites_expected"] += cites_expected
         status["retrieved_expected"] += retrieved_expected
         status["not_sure_answerable"] += not_sure
-        rows.append({"id": item["id"], "query": item["query"], "answer": answer, "citation_check": report.to_dict(),
+        rows.append({"id": item["id"], "query": item["query"], "answer": answer, "citation_check": report,
                      "cites_expected": cites_expected, "retrieved_expected": retrieved_expected,
                      "said_not_sure": not_sure})
-        print(f"  {item['id']:8} {report.status:5} cites_expected={cites_expected} not_sure={not_sure}")
+        print(f"  {item['id']:8} {report['status']:5} cites_expected={cites_expected} not_sure={not_sure}")
 
     for item in trick:
-        _, answer, report = ask(retriever, llm, item["query"], args.k)
+        _, answer, report = ask(retriever, llm, item["query"], args.k, floor)
         not_sure = says_not_sure(answer)
         status["not_sure_unanswerable"] += not_sure
-        status["fabricated"] += (not not_sure) and bool(report.cited)
-        rows.append({"id": item["id"], "query": item["query"], "answer": answer, "citation_check": report.to_dict(),
+        status["fabricated"] += (not not_sure) and bool(report["cited"])
+        rows.append({"id": item["id"], "query": item["query"], "answer": answer, "citation_check": report,
                      "said_not_sure": not_sure})
-        print(f"  {item['id']:8} not_sure={not_sure} cited={report.cited[:3]}")
+        print(f"  {item['id']:8} not_sure={not_sure} cited={report['cited'][:3]}")
 
     n, u = len(gold), len(trick)
     print(f"\nanswerable: pass {status['pass']}/{n}, warn {status['warn']}/{n}, fail {status['fail']}/{n}; "

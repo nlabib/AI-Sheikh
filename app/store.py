@@ -134,6 +134,15 @@ class Store:
     def ref_exists(self, ref: str) -> bool:
         return self.conn.execute("SELECT 1 FROM passages WHERE ref=? LIMIT 1", (ref,)).fetchone() is not None
 
+    def refs_by_alt_number(self, collection: str, number: str) -> list[str]:
+        """Refs whose alternative number is `number` or `number` plus a letter (Muslim 394 -> 394, 394a...)."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT ref FROM passages WHERE collection=? AND json_extract(meta, '$.alt_number') "
+            "IN (SELECT ? UNION SELECT ? || char(c) FROM (SELECT 97 AS c UNION SELECT 98 UNION SELECT 99 "
+            "UNION SELECT 100 UNION SELECT 101 UNION SELECT 102 UNION SELECT 103 UNION SELECT 104)) ORDER BY id",
+            (collection, number, number)).fetchall()
+        return [r[0] for r in rows]
+
     def by_ids(self, ids: list[int]) -> dict[int, Passage]:
         out: dict[int, Passage] = {}
         for i in range(0, len(ids), 500):

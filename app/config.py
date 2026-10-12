@@ -31,6 +31,9 @@ class Settings:
     top_k: int = field(default_factory=lambda: int(_env("TOP_K", "6")))
     # When an answer fails the citation check, replace it with "I'm not sure" (raw answer kept separately).
     strict_citations: bool = field(default_factory=lambda: _env("STRICT_CITATIONS", "1") != "0")
+    # Semantic similarity (E5 cosine) below which a passage counts as not about the question: it isn't shown
+    # to the model, and citing it is flagged. 0 turns this off. Calibrate with `python -m tools.calibrate_relevance`.
+    min_relevance: float = field(default_factory=lambda: float(_env("MIN_RELEVANCE", "0")))
 
     @property
     def raw_dir(self) -> Path:

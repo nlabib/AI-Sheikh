@@ -20,6 +20,9 @@ _AR_FOLD = str.maketrans(
 # Bangla and Arabic-Indic digits -> ASCII, so "২:২৫৫" and "٢:٢٥٥" parse as 2:255.
 _DIGITS = str.maketrans("০১২৩৪৫৬৭৮৯٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "0123456789" * 3)
 
+# Footnote marks in the Bangla Quran translation, e.g. "[১]" or "[১২]". Over half of its verses have them.
+_BN_FOOTNOTE = re.compile(r"\s*\[\s*\u200c?[০-৯]{1,3}\s*।?\s*\]")
+
 # Python's \w splits Bangla words on vowel signs, so include the whole block.
 _TOKEN = re.compile(r"[\wঀ-৿‌‍]+")
 
@@ -59,6 +62,12 @@ def normalize(text: str) -> str:
     text = _AR_DIACRITICS.sub("", text).translate(_AR_FOLD).translate(_DIGITS)
     text = text.replace("\u00ad", "")  # soft hyphens appear in some hadith texts
     return text.lower()
+
+
+def strip_footnotes(text: str) -> str:
+    """Drop the translator's footnote marks so they are neither shown to the model nor mistaken for
+    citation markers when it quotes the verse."""
+    return _BN_FOOTNOTE.sub("", text)
 
 
 def tokenize(text: str, drop_stopwords: bool = False) -> list[str]:

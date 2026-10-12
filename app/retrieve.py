@@ -63,9 +63,11 @@ class Retriever:
         self.embedder = embedder
         self.index = index if (index is not None and embedder is not None) else None
         self._row_collection = None
+        self._row_of: dict[int, int] = {}
         if self.index is not None:
             by_id = store.collections_by_id()
             self._row_collection = np.array([by_id.get(int(i), "") for i in self.index.ids])
+            self._row_of = {int(pid): row for row, pid in enumerate(self.index.ids)}
 
     def _mask(self, collections: list[str] | None):
         if not collections or self._row_collection is None:
@@ -101,13 +103,15 @@ class Retriever:
                 scores[p.ref] = scores.get(p.ref, 0.0) + 1.0 / (RRF_K + rank)
                 matched.setdefault(p.ref, set()).add(method)
 
-        # A reference typed explicitly ("2:255", "Bukhari 1") always ranks first.
-        for ref in find_explicit_refs(query):
-            if self.store.ref_exists(ref) and (not collections or parse_ref(ref).collection in collections):
-                scores[ref] = 1.0 + scores.get(ref, 0.0)
-                matched.setdefault(ref, set()).add("reference")
+        # A reference typed explicitly ("2:255", "Bukhari 1", "Surah al-Ikhlas") always ranks first, in the
+        # order typed (ayat of a named surah in order).
+        explicit = [ref for ref in self.explicit_refs(query)
+                    if not collections or parse_ref(ref).collection in collections]
+        for i, ref in enumerate(explicit):
+            scores[ref] = 2.0 - i / 1000 + scores.get(ref, 0.0) / 1000
+            matched.setdefault(ref, set()).add("reference")
 
-        top = sorted(scores, key=scores.get, reverse=True)[:k]
+        top = sorted(scores, key=scores.get, reverse=True)[:max(k, len(explicit))]
         return [Hit(ref, scores[ref], sorted(matched[ref]), self._ordered(ref, query)) for ref in top]
 
     def search_balanced(self, query: str, k: int = 6, mode: str = "hybrid",
@@ -125,14 +129,40 @@ class Retriever:
         if hadith:
             sides.append(self.search(query, k=k, mode=mode, collections=hadith))
         explicit = [h for side in sides for h in side if "reference" in h.matched_by]
-        merged: list[Hit] = sorted(explicit, key=lambda h: -h.score)
-        seen = {h.ref for h in merged}
+        explicit.sort(key=lambda h: -h.score)
+        seen = {h.ref for h in explicit}
+        rest: list[Hit] = []
         for group in zip_longest(*sides):
             for h in group:
                 if h is not None and h.ref not in seen:
-                    merged.append(h)
+                    rest.append(h)
                     seen.add(h.ref)
-        return merged[:k]
+        # A whole named surah can fill k by itself; still leave room for passages about the question.
+        return explicit + rest[:max(k - len(explicit), k // 2)]
+
+    def explicit_refs(self, query: str) -> list[str]:
+        """Typed references that exist in the corpus. "Muslim 394" also finds the hadith whose
+        Abd al-Baqi number is 394, the numbering most books and sites use."""
+        out: list[str] = []
+        for ref in find_explicit_refs(query):
+            if ref.startswith("muslim:"):
+                out += self.store.refs_by_alt_number("muslim", ref.partition(":")[2])
+            if self.store.ref_exists(ref):
+                out.append(ref)
+        return list(dict.fromkeys(out))
+
+    def relevance(self, query: str, refs: list[str]) -> dict[str, float]:
+        """How close each ref is in meaning to the query: the best E5 cosine over its editions.
+        Empty without a vector index."""
+        if self.index is None or not refs:
+            return {}
+        qv = self.embedder.embed_queries([query])[0]
+        out: dict[str, float] = {}
+        for ref in refs:
+            rows = [self._row_of[p.id] for p in self.store.by_ref(ref) if p.id in self._row_of]
+            if rows:
+                out[ref] = float(np.max(self.index.vectors[rows] @ qv))
+        return out
 
     def _ordered(self, ref: str, query: str) -> list[Passage]:
         """All editions of a ref: the question's language first, then Arabic, then the rest."""

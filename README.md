@@ -86,7 +86,9 @@ Environment variables (see `app/config.py`): `LM_BASE_URL` (default
 `http://127.0.0.1:1234/v1`), `LM_MODEL`, `LM_API_KEY`, `EMBED_MODEL`
 (default `intfloat/multilingual-e5-small`; `-base` or `-large` are better and slower),
 `EMBEDDER` (`e5` or `hashing`), `DB_PATH`, `INDEX_DIR`, `TOP_K`, `STRICT_CITATIONS`
-(default `1`: answers that fail the citation check are replaced with "I'm not sure").
+(default `1`: answers that fail the citation check are replaced with "I'm not sure"), `MIN_RELEVANCE`
+(default `0`, off: the E5 similarity below which a passage counts as off topic; pick it with
+`python -m tools.calibrate_relevance`).
 
 ## Sources and licences
 

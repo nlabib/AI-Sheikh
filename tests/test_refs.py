@@ -23,3 +23,21 @@ def test_fractional_hadith_numbers():
     assert hadith_ref("bukhari", 7.0) == "bukhari:7"
     assert find_markers("see [bukhari:402.2]") == ["bukhari:402.2"]
     assert parse_ref("muslim:4927").label == "Sahih Muslim 4927"
+
+
+def test_reference_phrasings_people_use():
+    assert find_explicit_refs("What is Sahih Bukhari hadith number 1?") == ["bukhari:1"]
+    assert find_explicit_refs("Sunan Abi Dawud 4031") == ["abudawud:4031"]
+    assert find_explicit_refs("مسلم حديث رقم ٣٩٤") == ["muslim:394"]
+
+
+def test_short_surahs_by_name_or_number_are_given_whole():
+    ikhlas = ["quran:112:1", "quran:112:2", "quran:112:3", "quran:112:4"]
+    assert find_explicit_refs("Show me Surah Al-Ikhlas.") == ikhlas
+    assert find_explicit_refs("surah 112") == ikhlas
+    assert find_explicit_refs("সূরা ১১২") == ikhlas
+    assert len(find_explicit_refs("is surah fathia mandatory in every prayer")) == 7  # typo, Al-Faatiha
+    assert len(find_explicit_refs("surah ikhlas and surah nas")) == 10
+    assert find_explicit_refs("surah al-baqarah") == []  # too long to hand over whole
+    assert find_explicit_refs("which surah talks about patience") == []
+    assert find_explicit_refs("surah 2:255") == ["quran:2:255"]
