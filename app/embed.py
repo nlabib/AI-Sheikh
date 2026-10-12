@@ -111,14 +111,15 @@ class VectorIndex:
         np.save(directory / "ids.npy", self.ids)
         (directory / "meta.json").write_text(
             json.dumps({"embedder": self.embedder_name, "count": int(len(self.ids)),
-                        "dim": int(self.vectors.shape[1]) if len(self.ids) else 0}, indent=2)
+                        "dim": int(self.vectors.shape[1]) if len(self.ids) else 0}, indent=2),
+            encoding="utf-8",
         )
 
     @classmethod
     def load(cls, directory: Path) -> "VectorIndex | None":
         if not (directory / "meta.json").exists():
             return None
-        meta = json.loads((directory / "meta.json").read_text())
+        meta = json.loads((directory / "meta.json").read_text(encoding="utf-8"))
         return cls(np.load(directory / "ids.npy"), np.load(directory / "vectors.npy"), meta["embedder"])
 
 

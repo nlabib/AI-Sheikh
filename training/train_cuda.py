@@ -15,6 +15,7 @@ and the result is a ~100 MB adapter folder rather than a new 8 GB model.
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import math
 import random
@@ -37,6 +38,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--epochs", type=float)
     ap.add_argument("--max-steps", dest="max_steps", type=int, help="stop after N optimiser steps (try 20 first)")
     ap.add_argument("--lr", type=float)
+    ap.add_argument("--eval-steps", dest="eval_steps", type=int, help="measure valid loss every N steps")
+    ap.add_argument("--report-to", dest="report_to", help='"tensorboard" (default) or "none"')
     ap.add_argument("--dry-run", action="store_true",
                     help="tokenise the data and report lengths, then stop; no GPU needed")
     return ap.parse_args(argv)
@@ -62,6 +65,30 @@ def report(name: str, encoded: list, dropped: int) -> None:
     print(f"{name}: {len(encoded)} examples, {dropped} dropped as too long; "
           f"tokens per example median {lengths[len(lengths) // 2]}, max {lengths[-1]}; "
           f"{trained} answer tokens carry the loss")
+
+
+def gpu_stats_callback(log_dir: Path):
+    """A Trainer callback that writes GPU memory and utilisation to TensorBoard (Trainer doesn't log these)."""
+    import torch
+    from torch.utils.tensorboard import SummaryWriter
+    from transformers import TrainerCallback
+
+    class GpuStats(TrainerCallback):
+        def __init__(self):
+            self.writer = SummaryWriter(str(log_dir))
+
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            step = state.global_step
+            self.writer.add_scalar("gpu/memory_allocated_gb", torch.cuda.memory_allocated() / 2**30, step)
+            self.writer.add_scalar("gpu/memory_reserved_gb", torch.cuda.memory_reserved() / 2**30, step)
+            self.writer.add_scalar("gpu/peak_memory_gb", torch.cuda.max_memory_allocated() / 2**30, step)
+            try:  # needs nvidia-ml-py
+                self.writer.add_scalar("gpu/utilization_pct", torch.cuda.utilization(), step)
+            except Exception:
+                pass
+            self.writer.flush()
+
+    return GpuStats()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -127,6 +154,10 @@ def main(argv: list[str] | None = None) -> int:
         return {k: torch.tensor(v) for k, v in padded.items()}
 
     out = Path(cfg["out"])
+    # transformers 5 dropped warmup_ratio; there a float warmup_steps below 1 means a ratio of total steps.
+    warmup = ({"warmup_ratio": cfg["warmup_ratio"]}
+              if "warmup_ratio" in inspect.signature(TrainingArguments.__init__).parameters
+              else {"warmup_steps": cfg["warmup_ratio"]})
     training_args = TrainingArguments(
         output_dir=str(out),
         per_device_train_batch_size=cfg["batch_size"],
@@ -136,24 +167,30 @@ def main(argv: list[str] | None = None) -> int:
         max_steps=cfg["max_steps"],
         learning_rate=cfg["lr"],
         lr_scheduler_type="cosine",
-        warmup_ratio=cfg["warmup_ratio"],
+        **warmup,
         logging_steps=cfg["logging_steps"],
         save_steps=cfg["save_steps"],
         save_total_limit=3,
         eval_strategy="steps" if eval_enc else "no",
-        eval_steps=cfg["save_steps"] if eval_enc else None,
+        eval_steps=cfg["eval_steps"] if eval_enc else None,
+        eval_on_start=bool(eval_enc),  # valid loss of the untouched model, to compare against the end
         bf16=bf16,
         fp16=not bf16,
         optim="paged_adamw_8bit",
         gradient_checkpointing=cfg["gradient_checkpointing"],
         remove_unused_columns=False,
-        report_to="none",
+        report_to=cfg["report_to"],  # TensorBoard writes to <out>/runs/; view with: tensorboard --logdir outputs
         seed=cfg["seed"],
     )
+    # One directory per run, so a smoke run and the full run into the same output dir stay separate charts.
+    gpu_dir = out / "runs" / f"gpu-{time.strftime('%Y%m%d-%H%M%S')}"
+    callbacks = [gpu_stats_callback(gpu_dir)] if "tensorboard" in str(cfg["report_to"]) else []
     trainer = Trainer(model=model, args=training_args, train_dataset=train_enc,
-                      eval_dataset=eval_enc or None, data_collator=collate)
+                      eval_dataset=eval_enc or None, data_collator=collate, callbacks=callbacks)
     t0 = time.time()
     trainer.train()
+    if eval_enc:  # short runs never reach eval_steps, so always measure valid loss once at the end
+        trainer.evaluate()
     model.save_pretrained(out / "adapter")
     tokenizer.save_pretrained(out / "adapter")
     summary = {"config": cfg, "minutes": round((time.time() - t0) / 60, 1),

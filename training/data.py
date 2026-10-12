@@ -111,7 +111,10 @@ DEFAULTS: dict[str, Any] = {
     "gradient_checkpointing": True,
     "load_in_4bit": True,
     "logging_steps": 10,
+    "eval_steps": 20,  # measure valid loss this often, so you can watch for overfitting
     "save_steps": 200,
+    # Where Trainer sends its logs: "tensorboard" writes charts to <out>/runs (see TRAINING_GUIDE, "Watching training").
+    "report_to": "tensorboard",
     "seed": 42,
 }
 
@@ -119,7 +122,7 @@ DEFAULTS: dict[str, Any] = {
 def load_config(path: Path | None, overrides: dict[str, Any]) -> dict[str, Any]:
     cfg = dict(DEFAULTS)
     if path:
-        loaded = yaml.safe_load(Path(path).read_text()) or {}
+        loaded = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
         unknown = set(loaded) - set(DEFAULTS)
         if unknown:
             raise ValueError(f"unknown config keys in {path}: {sorted(unknown)}")

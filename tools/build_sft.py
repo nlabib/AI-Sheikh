@@ -172,7 +172,7 @@ def build(store: Store, per_kind: int, seed: int) -> list[dict]:
         numbers.setdefault(c, []).append(n)
     if not numbers.get("quran"):
         raise SystemExit("no trainable Quran passages in the corpus; run tools.fetch and tools.ingest first")
-    gold_queries = {json.loads(line)["query"] for line in GOLD.read_text().splitlines() if line.strip()}
+    gold_queries = {json.loads(line)["query"] for line in GOLD.read_text(encoding="utf-8").splitlines() if line.strip()}
 
     makers = [lambda l: _quran_lookup(store, rng, l, numbers), lambda l: _hadith_lookup(store, rng, l, numbers),
               lambda l: _no_answer(store, rng, l, numbers), lambda l: _missing_ref(store, rng, l, numbers)]

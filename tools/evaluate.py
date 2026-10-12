@@ -113,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps({"embedder": index.embedder_name if index is not None else None,
-                                        "results": results}, ensure_ascii=False, indent=2))
+                                        "results": results}, ensure_ascii=False, indent=2), encoding="utf-8")
     return 0
 
 

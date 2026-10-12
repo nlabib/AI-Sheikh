@@ -216,6 +216,41 @@ model spends its effort on learning to *answer*, not to repeat prompts.
 When it finishes you get `outputs/islamic-qwen-lora/adapter/` and `training_summary.json`
 (time taken, loss history, peak GPU memory). Keep the summary; it's your record of the run.
 
+### Watching training
+
+The trainer writes charts for TensorBoard while it runs (`report_to: tensorboard`, the default).
+In a second terminal, in the project folder:
+
+```bash
+tensorboard --logdir outputs --host 127.0.0.1 --port 6006
+```
+
+Then open http://localhost:6006 in your browser. Each training run appears as its own coloured line.
+Charts refresh every 30 seconds, so you can leave the page open during the run. To watch the GPU
+itself, run `nvidia-smi -l 2` in a third terminal (it prints every 2 seconds), or open Task Manager,
+Performance, GPU.
+
+Have a run from before charts existed? `python -m training.summary_to_tensorboard outputs/<run>`
+draws its charts from `training_summary.json`.
+
+What each chart means:
+
+| Chart | What it is | Healthy | Problem |
+|---|---|---|---|
+| `train/loss` | how wrong the model is on the answers it's learning, every 10 steps | drops fast in the first steps (it picks up the format), then flattens | flat from the start (learning rate too low, or data didn't load); jagged and rising (learning rate too high) |
+| `eval/loss` | the same, on `valid.jsonl`, which it never trains on; every 20 steps | falls with train loss, then levels off | **turns upward while train loss keeps falling: overfitting.** It has started memorising instead of learning; stop at the lowest point (fewer epochs) |
+| `train/learning_rate` | size of each update | ramps up over the first few steps (warm-up), then a smooth cosine curve down to ~0 | — (it's a schedule, not a measurement) |
+| `train/grad_norm` | how big each update wants to be | settles to small values | spikes far above its usual level; often comes with a loss spike |
+| `gpu/memory_*_gb` | GPU memory the trainer holds (`reserved`) and actually uses (`allocated`), and the peak | flat once training is going, below your card's size | near the card's size. On Windows the driver then quietly spills into system RAM ("shared GPU memory" in Task Manager), and training gets much slower instead of crashing. Lower `--batch-size` and raise `--grad-accum` to keep the same effective batch |
+| `gpu/utilization_pct` | how busy the GPU is | near 100% during steps | low: the GPU is waiting (CPU, disk, or memory spilling) |
+
+**A warning these charts can't give you.** On the first real run (RTX 3090, see
+`docs/TRAINING_LOG.md`), train loss fell to about 0.0001 and eval loss to 0.002, which looks
+perfect. But `valid.jsonl` is made by the same templates as `train.jsonl`, so a model that
+memorised the templates also scores near zero on it. The charts said "great", while the real
+answer test (step 7) found broken answers. A loss near zero on template data means
+"memorised", not "learned". The only real check is step 7, plus reading answers yourself.
+
 ## Step 6b: Train on a Mac
 
 ```bash
