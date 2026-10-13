@@ -12,6 +12,11 @@ construction. They do NOT teach fiqh or interpretation; that needs examples
 written or reviewed by someone qualified (data/sft/reviewed/*.jsonl, merged in
 automatically when present).
 
+Varied answers that combine several sources, answer part of a question, set out differing views or turn down
+a question the sources don't answer are in data/sft/generated/*.jsonl. They were drafted against the corpus and
+each one passed tools.grounded_sft (exact quotes from training-allowed text, the citation check, and no
+citation of an evaluation ref). They are merged in automatically.
+
 Licensing rule enforced here: only passages from sources with
 allow_training=True (tools/sources.py) are placed in prompts or answers.
 Questions from the evaluation set are never used, so the eval stays honest.
@@ -197,7 +202,9 @@ def build(store: Store, per_kind: int, seed: int) -> list[dict]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--per-kind", type=int, default=300, help="examples per kind (4 kinds)")
+    # 150 per template kind: the templates are easy to memorise (the first run's loss hit ~0 by step 30), so they
+    # are kept to a minority next to the generated answers.
+    ap.add_argument("--per-kind", type=int, default=150, help="template examples per kind (4 kinds)")
     ap.add_argument("--valid-share", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out-dir", type=Path, default=SFT_DIR)
@@ -205,10 +212,11 @@ def main(argv: list[str] | None = None) -> int:
 
     store = Store(get_settings().db_path)
     examples = build(store, args.per_kind, args.seed)
-    reviewed_dir = args.out_dir / "reviewed"
     reviewed = []
-    for path in sorted(reviewed_dir.glob("*.jsonl")) if reviewed_dir.exists() else []:
-        reviewed += [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    for sub in ("reviewed", "generated"):
+        folder = args.out_dir / sub
+        for path in sorted(folder.glob("*.jsonl")) if folder.exists() else []:
+            reviewed += [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     examples = reviewed + examples
     random.Random(args.seed).shuffle(examples)
 
@@ -222,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
     for e in examples:
         kinds[e["meta"]["kind"]] = kinds.get(e["meta"]["kind"], 0) + 1
     print(f"wrote {len(examples) - n_valid} train / {n_valid} valid examples to {args.out_dir} "
-          f"({len(reviewed)} reviewed); by kind: {kinds}")
+          f"({len(reviewed)} reviewed or generated); by kind: {kinds}")
     return 0
 
 

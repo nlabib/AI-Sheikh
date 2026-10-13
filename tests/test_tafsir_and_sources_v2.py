@@ -47,3 +47,33 @@ def test_search_only_translations_are_not_shown_and_tafsir_gets_a_slot(store):
     verse = next(h for h in hits if h.ref == "quran:2:256")
     assert "eng-ummmuhammad" not in [p.edition for p in verse.passages]
     assert len({p.lang for p in verse.passages}) == len(verse.passages)
+
+
+def test_benchmark_scoring_and_files():
+    from tools.benchmark import load, score
+    items = load()
+    assert len(items) >= 250 and {i["lang"] for i in items} == {"en", "bn", "ar"}
+    answerable = {"expected": "answer", "sources": ["quran:2:256"], "acceptable_sources": [], "must_mention": []}
+    ok = {"answer": "No compulsion [quran:2:256].", "citation_check": {"cited": ["quran:2:256"], "status": "pass"}}
+    off = {"answer": "Something [quran:1:1].", "citation_check": {"cited": ["quran:1:1"], "status": "pass"}}
+    unsure = {"answer": "I'm not sure.", "citation_check": {"cited": [], "status": "pass"}}
+    assert score(answerable, ok)["verdict"] == "good"
+    assert score(answerable, off)["verdict"] == "wrong"
+    assert score(answerable, unsure)["verdict"] == "refused"
+    trick = {"expected": "not_sure", "sources": [], "acceptable_sources": ["quran:2:256"], "must_mention": []}
+    assert score(trick, unsure)["verdict"] == "good" and score(trick, ok)["verdict"] == "good"
+    assert score(trick, off)["verdict"] == "wrong"
+
+
+def test_grounded_draft_checker(store):
+    from tools.grounded_sft import check_draft
+    good = {"lang": "en", "kind": "concise", "question": "Is there compulsion in religion?",
+            "evidence": ["quran:2:256", "bukhari:1"],
+            "answer": "No. \"There is no compulsion in religion\" [quran:2:256]."}
+    example, why = check_draft(good, store, set(), set())
+    assert why == "ok" and example["messages"][-1]["content"] == good["answer"]
+    assert check_draft(good, store, {"quran:2:256"}, set())[1].startswith("cites evaluation refs")
+    decline = dict(good, kind="distractor_decline", answer="I'm not sure. The sources don't cover this.")
+    assert check_draft(decline, store, set(), set())[1] == "ok"
+    invented = dict(good, answer="\"There is no compulsion in anything at all\" [quran:2:256].")
+    assert check_draft(invented, store, set(), set())[0] is None
