@@ -320,6 +320,44 @@ Open http://127.0.0.1:8000/docs and try `/ask`. Every response includes the sour
 
 ---
 
+## Round 2: more sources, varied answers, the 300-question benchmark
+
+The first run taught the answer format, but its 1,200 template answers each quoted one source, and the model
+memorised them (training loss near 0 by step 30). Round 2 changes the data, not the method:
+
+| What | Why |
+|---|---|
+| New sources: Muwatta Malik, Nawawi 40, Hadith Qudsi, Tafsir Ibn Kathir (ar/en/bn), Jalalayn, 3 more Quran translations for search | More to find and cite; tafsir explains verses in the user's language |
+| 582 checked answers in `data/sft/generated/` | Several sources per answer, partial answers, differing views, declines, in all three languages |
+| Templates cut from 300 to 150 per kind | Less to memorise |
+| Learning rate 1e-4 instead of 2e-4 (`qwen3-4b-24gb-v2.yaml`) | Gentler, so the model learns the pattern rather than the wording |
+| `tools.benchmark`: 300 questions with reference answers | A fair before/after score; none of its sources is cited in training data |
+
+Run these in the project folder with the virtual environment active. Times are rough guesses for an RTX 3090.
+
+```bash
+git pull                                   # on branch claude/benchmark-corpus-v2 until PR #6 is merged
+python -m tools.fetch                      # about 260 MB of new files; already-downloaded ones are skipped
+python -m tools.ingest                     # corpus grows from ~121,000 to ~177,500 passages
+python -m tools.index                      # rebuild the E5 search index for the new passages
+# Baseline: score the round-1 model on the new benchmark (LM Studio serving ai-sheikh-ft)
+RERANKER=BAAI/bge-reranker-v2-m3 RERANK_MIN=0.01 LM_MODEL=ai-sheikh-ft python -m tools.benchmark --out results/bench-ft-v1.json
+python -m tools.build_sft                  # ~1,180 examples: 582 generated + 600 templates
+python -m training.train_cuda --config training/configs/qwen3-4b-24gb-v2.yaml
+```
+
+Watch it in TensorBoard (`tensorboard --logdir outputs`). This time the training loss should fall more slowly
+and level off well above zero; if it hits ~0 within the first epoch, the model is memorising again. Then merge,
+convert and load it exactly as in Steps 7 and 8, with `outputs/ai-sheikh-v2` and the name `ai-sheikh-v2`, and
+score it:
+
+```bash
+RERANKER=BAAI/bge-reranker-v2-m3 RERANK_MIN=0.01 LM_MODEL=ai-sheikh-v2 python -m tools.benchmark --out results/bench-ft-v2.json
+```
+
+Compare `good` and `wrong` per language and category in the two reports, and read the starred (scholar-review)
+items in `results/bench-ft-v2.md` yourself.
+
 ## When things go wrong
 
 | Symptom | Likely cause and fix |

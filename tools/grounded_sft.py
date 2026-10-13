@@ -13,7 +13,8 @@ is rejected when:
   * the answer quotes anything that is not word for word in a training-allowed edition of the cited ref;
   * the answer fails the citation check (app/citations.py) in strict mode, or cites outside the evidence;
   * a "multi_source" or "disputed" answer cites fewer than two sources, or a decline cites any;
-  * it cites a ref that the benchmark or data/eval/gold.jsonl uses, which would leak the evaluation.
+  * it cites a ref that the benchmark or data/eval/gold.jsonl uses, or tafsir on such a verse, which would leak
+    the evaluation.
 Rejected drafts are listed with the reason; nothing is fixed silently.
 """
 
@@ -27,7 +28,7 @@ from pathlib import Path
 from app.citations import _QUOTE, MIN_QUOTE_CHARS, _quote_found, check_answer, says_not_sure
 from app.config import ROOT, get_settings
 from app.prompts import build_messages
-from app.refs import MARKER, expand_marker, find_markers
+from app.refs import MARKER, TAFSIR_COLLECTIONS, expand_marker, find_markers
 from app.retrieve import Hit
 from app.store import Store
 from app.text import strip_footnotes
@@ -62,6 +63,16 @@ def trainable_hit(store: Store, ref: str) -> Hit | None:
     return Hit(ref, 1.0, ["grounded"], passages) if passages else None
 
 
+def _tafsir_verses(store: Store, ref: str) -> set[str]:
+    """The Quran refs a tafsir passage comments on: citing tafsir on an evaluation verse leaks it too."""
+    if ref.partition(":")[0] not in TAFSIR_COLLECTIONS:
+        return set()
+    meta = next((p.meta for p in store.by_ref(ref)), {})
+    if "surah" not in meta:
+        return set()
+    return {f"quran:{meta['surah']}:{a}" for a in range(meta["ayah"], meta.get("ayah_to", meta["ayah"]) + 1)}
+
+
 def check_draft(d: dict, store: Store, banned_refs: set[str], banned_questions: set[str]) -> tuple[dict | None, str]:
     missing = {"lang", "kind", "question", "evidence", "answer"} - d.keys()
     if missing:
@@ -78,7 +89,7 @@ def check_draft(d: dict, store: Store, banned_refs: set[str], banned_questions: 
         hits.append(hit)
     answer = d["answer"].strip()
     cited = list(dict.fromkeys(r for m in find_markers(answer) for r in expand_marker(m)))
-    leaked = [r for r in cited if r in banned_refs]
+    leaked = [r for r in cited if r in banned_refs or _tafsir_verses(store, r) & banned_refs]
     if leaked:
         return None, f"cites evaluation refs {leaked}"
     report = check_answer(answer, d["evidence"], store, question_lang=d["lang"])

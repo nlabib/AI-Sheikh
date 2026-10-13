@@ -1,0 +1,13 @@
+# Second run on a 24 GB card (RTX 3090) under Windows: varied, multi-source answers (data/sft/generated/) plus
+# fewer templates. Batch 2 x 8 keeps VRAM from spilling into shared memory (see docs/TRAINING_LOG.md).
+# A lower learning rate than run 1, whose loss reached ~0 by step 30 because the templates were memorised.
+model: Qwen/Qwen3-4B
+out: outputs/ai-sheikh-v2
+max_len: 4096
+batch_size: 2
+grad_accum: 8
+epochs: 2
+lr: 1.0e-4
+lora_r: 32
+lora_alpha: 64
+gradient_checkpointing: true

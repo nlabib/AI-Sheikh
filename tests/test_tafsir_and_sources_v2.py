@@ -77,3 +77,13 @@ def test_grounded_draft_checker(store):
     assert check_draft(decline, store, set(), set())[1] == "ok"
     invented = dict(good, answer="\"There is no compulsion in anything at all\" [quran:2:256].")
     assert check_draft(invented, store, set(), set())[0] is None
+
+
+def test_tafsir_on_an_evaluation_verse_counts_as_leaking_it(store):
+    from tools.grounded_sft import check_draft
+    store.upsert([Passage("jalalayn:2:255", "jalalayn", "ar", "ar-tafsir-al-jalalayn", "تفسير آية الكرسي",
+                          "tafsir-jalalayn-ar", True, {"surah": 2, "ayah": 255, "ayah_to": 256})])
+    draft = {"lang": "ar", "kind": "concise", "question": "ما معنى آية الكرسي؟", "evidence": ["jalalayn:2:255"],
+             "answer": "هذا «تفسير آية الكرسي» [jalalayn:2:255]."}
+    assert check_draft(draft, store, set(), set())[1] == "ok"
+    assert check_draft(draft, store, {"quran:2:256"}, set())[1].startswith("cites evaluation refs")
