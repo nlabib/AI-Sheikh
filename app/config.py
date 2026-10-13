@@ -39,6 +39,8 @@ class Settings:
     reranker: str = field(default_factory=lambda: _env("RERANKER", ""))
     rerank_min: float = field(default_factory=lambda: float(_env("RERANK_MIN", "0")))
     rerank_pool: int = field(default_factory=lambda: int(_env("RERANK_POOL", "30")))
+    # Places among the top_k sources given to tafsir in the question's language (0 turns tafsir off).
+    tafsir_slots: int = field(default_factory=lambda: int(_env("TAFSIR_SLOTS", "1")))
 
     @property
     def relevance_floor(self) -> float:

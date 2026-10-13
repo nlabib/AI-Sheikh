@@ -30,7 +30,21 @@ HADITH_COLLECTIONS = {
     "tirmidhi": "Jami at-Tirmidhi",
     "nasai": "Sunan an-Nasa'i",
     "ibnmajah": "Sunan Ibn Majah",
+    "malik": "Muwatta Malik",
+    "nawawi": "Forty Hadith of an-Nawawi",
+    "qudsi": "Forty Hadith Qudsi",
 }
+
+# Tafsir, keyed by verse like the Quran. Each language edition is its own collection because long commentary
+# is split into chunks ("ibnkathiren:2:255.2" is the second chunk on 2:255), and the chunks of different
+# translations don't line up.
+TAFSIR_COLLECTIONS = {
+    "ibnkathir": "Tafsir Ibn Kathir (Arabic)",
+    "ibnkathiren": "Tafsir Ibn Kathir (English, abridged)",
+    "ibnkathirbn": "Tafsir Ibn Kathir (Bangla)",
+    "jalalayn": "Tafsir al-Jalalayn (Arabic)",
+}
+TAFSIR_LANGS = {"ibnkathir": "ar", "ibnkathiren": "en", "ibnkathirbn": "bn", "jalalayn": "ar"}
 
 # Spellings people actually type, in English, Bangla and Arabic.
 _ALIASES = {
@@ -41,6 +55,9 @@ _ALIASES = {
     "tirmidhi": ["tirmidhi", "at-tirmidhi", "তিরমিযী", "তিরমিজি", "الترمذي"],
     "nasai": ["nasai", "an-nasai", "nasa'i", "an-nasa'i", "নাসাঈ", "নাসায়ী", "النسائي"],
     "ibnmajah": ["ibn majah", "ibnmajah", "ইবনে মাজাহ", "ইবনু মাজাহ", "ابن ماجه"],
+    "malik": ["muwatta malik", "muwatta", "muwatta imam malik", "মুয়াত্তা মালিক", "মুওয়াত্তা", "موطأ مالك", "الموطأ"],
+    "nawawi": ["nawawi", "an-nawawi", "40 hadith nawawi", "forty hadith nawawi", "নববী", "الأربعين النووية", "النووية"],
+    "qudsi": ["hadith qudsi", "40 hadith qudsi", "qudsi", "হাদীসে কুদসী", "হাদিসে কুদসি", "الأحاديث القدسية", "القدسية"],
 }
 
 # Words people put between a collection name and the number: "Bukhari hadith no. 1", "مسلم حديث رقم ٣٩٤".
@@ -57,6 +74,15 @@ _ASKS_FOR_TEXT = re.compile(
     r"\b(?:show|recite|read|quote|text|says?|said|translat\w*|mean\w*|tafsir|explain|words|full|whole)\b"
     r"|দেখাও|পড়|পাঠ|তেলাওয়াত|অর্থ|অনুবাদ|কী বলা|কি বলা|ব্যাখ্যা"
     r"|نص|اقر|اعرض|معن|تفسير|ماذا تقول|ماذا يقول")
+# "Ibn Kathir on 2:255" asks for that tafsir's first part on the verse as well as the verse; "tafsir of 2:255"
+# asks for every tafsir's.
+_TAFSIR_WORDS = {
+    "ibnkathir": ["ibn kathir", "ibn kaseer", "ইবনে কাসীর", "ইবনে কাসির", "ابن كثير"],
+    "ibnkathiren": ["ibn kathir", "ibn kaseer"],
+    "ibnkathirbn": ["ইবনে কাসীর", "ইবনে কাসির", "ibn kathir"],
+    "jalalayn": ["jalalayn", "jalalain", "জালালাইন", "الجلالين"],
+}
+_TAFSIR_ANY = ["tafsir", "tafseer", "commentary", "তাফসীর", "তাফসির", "تفسير"]
 _CONNECTORS = {"and", "&", "or", "و", "এবং", "ও"}
 
 
@@ -99,12 +125,13 @@ def _fold_local(name: str) -> str:
 _SURAH_BY_LOCAL_NAME = {_fold_local(n): num for num, names in _LOCAL_SURAH_NAMES.items() for n in names}
 _SURAH_BY_NAME = {_fold_name(name): num for num, (name, _meaning, _n) in SURAHS.items()}
 
-MARKER = re.compile(r"\[((?:quran:\d{1,3}:\d{1,3}(?:-\d{1,3})?)|(?:[a-z]+:\d+(?:\.\d+)?))\]")
+MARKER = re.compile(r"\[((?:quran:\d{1,3}:\d{1,3}(?:-\d{1,3})?)|(?:[a-z]+:\d{1,3}:\d{1,3}(?:\.\d{1,2})?)"
+                    r"|(?:[a-z]+:\d+(?:\.\d+)?))\]")
 
 
 @dataclass(frozen=True)
 class Ref:
-    collection: str  # "quran" or a HADITH_COLLECTIONS key
+    collection: str  # "quran", a HADITH_COLLECTIONS key or a TAFSIR_COLLECTIONS key
     number: str  # "2:255" for Quran, "1" for hadith
 
     def __str__(self) -> str:
@@ -114,11 +141,18 @@ class Ref:
     def label(self) -> str:
         if self.collection == "quran":
             return f"Quran {self.number}"
+        if self.collection in TAFSIR_COLLECTIONS:
+            verse, _, part = self.number.partition(".")
+            return f"{TAFSIR_COLLECTIONS[self.collection]} on {verse}" + (f" (part {part})" if part else "")
         return f"{HADITH_COLLECTIONS.get(self.collection, self.collection)} {self.number}"
 
 
 def quran_ref(surah: int, ayah: int) -> str:
     return f"quran:{surah}:{ayah}"
+
+
+def tafsir_ref(collection: str, surah: int, ayah: int, part: int = 1) -> str:
+    return f"{collection}:{surah}:{ayah}" + (f".{part}" if part > 1 else "")
 
 
 def hadith_ref(collection: str, number: int | float | str) -> str:
@@ -163,9 +197,13 @@ def find_explicit_refs(query: str) -> list[str]:
     "surah 112" or "Surah Al-Ikhlas"."""
     q = normalize(query)
     found: list[str] = []
+    tafsirs = [c for c, words in _TAFSIR_WORDS.items() if any(w in q for w in words)]
+    if not tafsirs and any(w in q for w in _TAFSIR_ANY):
+        tafsirs = list(TAFSIR_COLLECTIONS)
     for s, a in re.findall(r"\b(\d{1,3})\s*[:/]\s*(\d{1,3})\b", q):
         if 1 <= int(s) <= 114:
             found.append(quran_ref(int(s), int(a)))
+            found += [tafsir_ref(c, int(s), int(a)) for c in tafsirs]
     if _asks_for_surah_text(q):
         for num in re.findall(_SURAH_WORD + r"\s*(?:no\.?|number|#|নং)?\s*(\d{1,3})\b(?!\s*[:/]\s*\d)", q):
             found += surah_refs(int(num))

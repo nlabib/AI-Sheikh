@@ -131,6 +131,10 @@ class Store:
         rows = self.conn.execute("SELECT * FROM passages WHERE ref=? ORDER BY lang", (ref,)).fetchall()
         return [Passage.from_row(r) for r in rows]
 
+    def has_collections(self, collections: list[str]) -> bool:
+        q = f"SELECT 1 FROM passages WHERE collection IN ({','.join('?' * len(collections))}) LIMIT 1"
+        return self.conn.execute(q, collections).fetchone() is not None
+
     def ref_exists(self, ref: str) -> bool:
         return self.conn.execute("SELECT 1 FROM passages WHERE ref=? LIMIT 1", (ref,)).fetchone() is not None
 
