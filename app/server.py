@@ -7,6 +7,7 @@ Endpoints: POST /ask, GET /search, GET /ref/{ref}, GET /health, GET /sources.
 
 from __future__ import annotations
 
+import re
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -17,7 +18,8 @@ from app.citations import check_answer
 from app.config import get_settings
 from app.embed import VectorIndex, make_embedder
 from app.llm import ChatClient, LLMError
-from app.prompts import NOT_SURE, build_messages
+from app.prompts import INTRO, NO_SOURCES, NOT_SURE, SALAM_REPLY, build_messages
+from app.rerank import make_reranker
 from app.retrieve import Retriever
 from app.store import Store
 from app.text import detect_lang
@@ -25,15 +27,20 @@ from app.text import detect_lang
 
 def build_retriever(settings) -> tuple[Retriever, str]:
     store = Store(settings.db_path)
+    reranker = make_reranker(settings.reranker)
+    rerank_note = f", reranked by {settings.reranker}" if reranker else ""
     index = VectorIndex.load(settings.index_dir)
     if index is None:
-        return Retriever(store), "fts only (no vector index; run `python -m tools.index`)"
+        return (Retriever(store, reranker=reranker, rerank_pool=settings.rerank_pool),
+                f"fts only (no vector index; run `python -m tools.index`){rerank_note}")
     embedder_kind = "hashing" if index.embedder_name.startswith("hashing") else "e5"
     if embedder_kind == "hashing" and settings.embedder != "hashing":
         # The hashing fallback makes hybrid results worse than FTS alone (docs/RESULTS.md).
-        return Retriever(store), "fts only (ignoring hashing index; set EMBEDDER=hashing to use it)"
+        return (Retriever(store, reranker=reranker, rerank_pool=settings.rerank_pool),
+                f"fts only (ignoring hashing index; set EMBEDDER=hashing to use it){rerank_note}")
     embedder = make_embedder(embedder_kind, index.embedder_name if embedder_kind == "e5" else "")
-    return Retriever(store, embedder, index), f"hybrid (fts + {index.embedder_name})"
+    return (Retriever(store, embedder, index, reranker=reranker, rerank_pool=settings.rerank_pool),
+            f"hybrid (fts + {index.embedder_name}){rerank_note}")
 
 
 @asynccontextmanager
@@ -45,6 +52,7 @@ async def lifespan(app: FastAPI):
         app.state.llm = ChatClient(settings)
     app.state.top_k = settings.top_k
     app.state.strict = getattr(app.state, "strict", settings.strict_citations)
+    app.state.min_relevance = getattr(app.state, "min_relevance", settings.relevance_floor)
     yield
 
 
@@ -87,25 +95,83 @@ def get_ref(request: Request, ref: str) -> dict:
                                   for p in passages]}
 
 
-@app.post("/ask")
-def ask(request: Request, body: AskRequest) -> dict:
-    st = request.app.state
-    retriever: Retriever = st.retriever
-    mode = body.mode if (body.mode != "vector" or retriever.index is not None) else "fts"
-    hits = retriever.search_balanced(body.question, k=body.k or st.top_k, mode=mode, collections=body.collections)
-    response = {"question": body.question, "sources": [h.to_dict() for h in hits]}
+_SALAM = re.compile(r"(salaa?m|assalamu|as-salamu|السلام عليكم|সালাম)", re.I)
+_SMALL_TALK = re.compile(
+    r"^\W*(?:(?:hi|hello|hey|salaa?m|(?:as)?-?salaa?mu?\s*(?:'?alaikum|alaykum)(?:\s*wa\s*rahmatullah\w*)?|"
+    r"السلام عليكم(?: ورحمة الله)?|মারহাবা|হ্যালো|আসসালামু আলাইকুম|সালাম|مرحبا|أهلا)\W*)?"
+    r"(?:who are you|what are you|what can you do|তুমি কে|আপনি কে|আপনি কী করতে পারেন|من أنت|ماذا تستطيع)?\W*$",
+    re.I)
+
+
+def small_talk_reply(question: str) -> str | None:
+    """Greetings and "who are you": answered with a fixed introduction instead of the model, which
+    otherwise makes up a persona."""
+    q = question.strip()
+    if not q or not _SMALL_TALK.match(q) or not re.search(r"\w", q):
+        return None
+    lang = detect_lang(q)
+    return (SALAM_REPLY[lang] if _SALAM.search(q) else "") + INTRO[lang]
+
+
+def tidy(answer: str, lang: str) -> str:
+    # The Bangla full stop leaks into English and Arabic answers from the training data.
+    return answer.replace("।", ".") if lang != "bn" else answer
+
+
+def answer_question(retriever: Retriever, llm, question: str, k: int, collections: list[str] | None = None,
+                    mode: str = "hybrid", strict: bool = True, min_relevance: float = 0.0) -> dict:
+    """The whole /ask pipeline: retrieve, drop passages that aren't about the question, ask the model,
+    check its citations, and replace a failing answer with "I'm not sure". tools.eval_answers uses it too,
+    so evaluation sees exactly what a user sees.
+
+    min_relevance is the floor for the relevance score in use: the reranker's (0-1) when the retriever has
+    one, otherwise E5 similarity."""
+    lang = detect_lang(question)
+    intro = small_talk_reply(question)
+    if intro:
+        return {"question": question, "sources": [], "answer": intro,
+                "citation_check": {"status": "pass", "cited": [], "issues": []}}
+    mode = mode if (mode != "vector" or retriever.index is not None) else "fts"
+    # The reranker fills k from a larger pool itself; the E5 floor needs spare candidates to fill from too.
+    e5_floor = min_relevance > 0 and retriever.reranker is None
+    hits = retriever.search_balanced(question, k=3 * k if e5_floor else k, mode=mode, collections=collections,
+                                     min_rerank=min_relevance if retriever.reranker is not None else 0.0)
+    if retriever.reranker is not None:
+        relevance = {h.ref: h.rerank for h in hits if h.rerank is not None}
+    else:
+        relevance = retriever.relevance(question, [h.ref for h in hits])
+    for h in hits:
+        if "reference" in h.matched_by:
+            relevance[h.ref] = 1.0  # the user asked for it by number
+    if min_relevance > 0 and relevance:
+        # Passages that aren't about the question only invite the model to cite them anyway.
+        hits = [h for h in hits if relevance.get(h.ref, 1.0) >= min_relevance]
+    if e5_floor:
+        explicit = [h for h in hits if "reference" in h.matched_by]
+        hits = explicit + [h for h in hits if "reference" not in h.matched_by][:max(k - len(explicit), k // 2)]
+    response = {"question": question, "sources": [dict(h.to_dict(), relevance=relevance.get(h.ref))
+                                                   for h in hits]}
     if not hits:
-        response.update(answer=NOT_SURE[detect_lang(body.question)],
+        response.update(answer=NO_SOURCES[lang] if min_relevance > 0 else NOT_SURE[lang],
                         citation_check={"status": "pass", "cited": [], "issues": []})
         return response
     try:
-        answer = st.llm.chat(build_messages(body.question, hits))
+        answer = tidy(llm.chat(build_messages(question, hits)), lang)
     except LLMError as e:
         response.update(answer=None, error=str(e), citation_check=None)
         return response
-    report = check_answer(answer, [h.ref for h in hits], retriever.store)
+    report = check_answer(answer, [h.ref for h in hits], retriever.store, question_lang=lang,
+                          relevance=relevance, min_relevance=min_relevance)
     response.update(answer=answer, citation_check=report.to_dict())
-    if report.status == "fail" and st.strict:
-        # An invented reference or a misquote: don't show it as an answer.
-        response.update(answer=NOT_SURE[detect_lang(body.question)], unverified_answer=answer)
+    if report.status == "fail" and strict:
+        # An invented reference, a misquote, an answer from memory: don't show it as an answer.
+        response.update(answer=NOT_SURE[lang], unverified_answer=answer)
     return response
+
+
+@app.post("/ask")
+def ask(request: Request, body: AskRequest) -> dict:
+    st = request.app.state
+    return answer_question(st.retriever, st.llm, body.question, k=body.k or st.top_k,
+                           collections=body.collections, mode=body.mode, strict=st.strict,
+                           min_relevance=st.min_relevance)

@@ -20,11 +20,27 @@ corpus and scoped. Current numbers: `docs/RESULTS.md`. Answer quality can't exce
 | each substantive sentence carries a marker | warn (`uncited_claim`) |
 | cited sentence shares vocabulary with its source, unless it carries a verified quote | warn (`weak_support`) |
 | answer makes substantive claims and cites nothing | fail (`unsupported_answer`) |
-| answer cites nothing (short reply, no claims) | warn (`no_citations`) |
+| answer cites nothing and doesn't open by declining | fail (`no_citations`) |
+| a sentence says "the Quran" but cites only hadith, or "the Prophet said" but cites only verses | fail (`misattributed`) |
+| Bangla text outside quotations in an English or Arabic answer | fail (`mixed_language`) |
+| one sentence repeated three or more times (twice: warn, `repeated_sentence`) | fail (`repetition`) |
+| a cited passage scores below the relevance floor (`RERANK_MIN` with a reranker, else `MIN_RELEVANCE`) | warn (`off_topic_citation`) |
+| every cited passage is below the floor | fail (`off_topic_answer`) |
 
-A pure refusal ("I'm not sure; the sources don't cover this; ask a qualified scholar") passes.
-"I'm not sure" followed by claims is not a refusal: it fails as `unsupported_answer`. With
+A refusal passes when it opens by declining ("I'm not sure…", or "The sources don't cover this…") and
+makes no uncited claims; sentences explaining what the sources lack are allowed. "I'm not sure" followed
+by claims is not a refusal: it fails as `unsupported_answer`. A claim with a refusal phrase tucked inside
+("wudu is clean, I won't guess") is not a refusal either. Bangla footnote marks like `[১]` are ignored. With
 `STRICT_CITATIONS` on (the default), any failing answer is replaced with "I'm not sure".
+
+The relevance checks are off until a floor is set. With `RERANKER` set (a cross-encoder such as
+`BAAI/bge-reranker-v2-m3`), they use the reranker's 0-1 score and `RERANK_MIN`; otherwise E5 similarity and
+`MIN_RELEVANCE`. E5 similarity can't reliably tell an off-topic passage from a relevant one (wrong verses
+often score higher than right ones; `docs/INFERENCE_REVIEW.md`), so prefer the reranker. Pick a value with
+`python -m tools.calibrate_relevance`, which also scores hand-checked hard cases. With a floor set, `/ask` also drops passages below the floor before the
+model sees them, and answers questions nothing in the corpus is about (weather, programming) with a
+fixed "I couldn't find anything about this" message. Greetings and "who are you?" get a fixed
+introduction without calling the model.
 
 **What this does not establish:** that the answer's reading of the source is correct. A sentence
 can cite the right verse and still misstate what it means. Closing that gap needs:

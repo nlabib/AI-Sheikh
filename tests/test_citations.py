@@ -1,4 +1,5 @@
 from app.citations import check_answer
+from app.store import Passage
 
 EVIDENCE = ["quran:2:256", "quran:2:255", "bukhari:1"]
 
@@ -55,9 +56,60 @@ def test_answer_from_memory_fails(store):
     assert report.status == "fail" and "unsupported_answer" in kinds(report)
 
 
-def test_short_uncited_reply_only_warns(store):
+def test_uncited_reply_that_does_not_decline_fails(store):
     report = check_answer("Yes.", EVIDENCE, store)
-    assert report.status == "warn" and "no_citations" in kinds(report)
+    assert report.status == "fail" and "no_citations" in kinds(report)
+    # A claim with a refusal fragment tacked on is not a refusal (seen in Arabic: "wudu is clean, I won't guess").
+    report = check_answer("الوضوء هو نظيف، فلن أخمّن", EVIDENCE, store)
+    assert report.status == "fail"
+
+
+def test_refusal_may_explain_what_the_sources_lack(store):
+    answer = ("I'm not sure. The sources provided do not include a Sahih Bukhari hadith numbered 9999, "
+              "so I cannot quote one for you.")
+    assert check_answer(answer, EVIDENCE, store).status == "pass"
+
+
+def test_hadith_presented_as_quran_fails(store):
+    report = check_answer('The Quran answers this: "Actions are judged by intentions" [bukhari:1].', EVIDENCE, store)
+    assert report.status == "fail" and "misattributed" in kinds(report)
+    ok = check_answer('The Prophet said: "Actions are judged by intentions" [bukhari:1].', EVIDENCE, store)
+    assert "misattributed" not in kinds(ok)
+
+
+def test_verse_presented_as_hadith_fails(store):
+    report = check_answer('The Prophet said "There is no compulsion in religion" [quran:2:256].', EVIDENCE, store)
+    assert "misattributed" in kinds(report)
+
+
+def test_bangla_footnote_marks_do_not_break_a_quote(store):
+    store.upsert([Passage("quran:2:256", "quran", "bn", "ben-test", "দ্বীন গ্রহণের ব্যাপারে কোন জোর-জবরদস্তি নেই [১]; "
+                          "সত্য পথ সুস্পষ্ট হয়েছে ভ্রান্ত পথ থেকে [২]।", "quran-bn-test")])
+    answer = 'আল্লাহ বলেন, "দ্বীন গ্রহণের ব্যাপারে কোন জোর-জবরদস্তি নেই [১]" [quran:2:256]'
+    report = check_answer(answer, EVIDENCE, store)
+    assert "malformed_marker" not in kinds(report) and "misquote" not in kinds(report), report.to_dict()
+
+
+def test_repetition_fails(store):
+    line = "There is no compulsion in religion [quran:2:256]. "
+    assert check_answer(line * 3, EVIDENCE, store).status == "fail"
+    assert check_answer(line * 2, EVIDENCE, store).status == "warn"
+
+
+def test_bangla_inside_english_answer_fails(store):
+    answer = "There is no compulsion in religion এর অনুগ্রহের উত্তর [quran:2:256]."
+    report = check_answer(answer, EVIDENCE, store, question_lang="en")
+    assert report.status == "fail" and "mixed_language" in kinds(report)
+    assert "mixed_language" not in kinds(check_answer(answer, EVIDENCE, store))
+
+
+def test_english_answer_to_bangla_or_arabic_question_fails(store):
+    answer = "There is no compulsion in religion [quran:2:256]."
+    for lang in ("bn", "ar"):
+        assert "mixed_language" in kinds(check_answer(answer, EVIDENCE, store, question_lang=lang))
+    # A book name in English inside a Bangla answer is fine.
+    from app.citations import _foreign_letters
+    assert _foreign_letters("ধর্মে কোনো জবরদস্তি নেই, Sahih Muslim [quran:2:256]।", "bn") == 0
 
 
 def test_not_sure_followed_by_a_guess_is_not_a_decline(store):
@@ -69,6 +121,14 @@ def test_not_sure_followed_by_a_guess_is_not_a_decline(store):
 def test_malformed_marker_flagged(store):
     report = check_answer("See [Q 2:256] for this [quran:2:256].", EVIDENCE, store)
     assert "malformed_marker" in kinds(report)
+
+
+def test_short_quote_does_not_shift_the_quote_marks(store):
+    # "Can I?" is too short to check; its closing mark must not pair with the next opening one and turn
+    # ' and the verse answers ' into a "misquote".
+    answer = 'People ask "Can I?" and the verse answers "There is no compulsion in religion." [quran:2:256]'
+    report = check_answer(answer, EVIDENCE, store)
+    assert report.status == "pass", report.to_dict()
 
 
 def test_quoted_sentence_with_period_inside_is_not_split(store):

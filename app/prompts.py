@@ -3,7 +3,7 @@ fine-tuned adapter learns exactly the format the server sends at inference time.
 
 from __future__ import annotations
 
-from app.text import detect_lang
+from app.text import detect_lang, strip_footnotes
 
 SYSTEM_PROMPT = """You answer questions about Islam using ONLY the numbered sources provided.
 
@@ -26,6 +26,30 @@ NOT_SURE = {
     "ar": "لست متأكدًا. المصادر المتاحة لي لا تجيب عن هذا، فلن أخمّن. يرجى سؤال عالم مختص.",
 }
 
+# When no passage is about the question at all (off-topic, or nothing in the corpus): no scholar line, since
+# "ask a scholar about the weather" helps nobody.
+NO_SOURCES = {
+    "en": "I couldn't find anything about this in the Quran or the six hadith collections I search, "
+          "and I only answer from those sources, so I won't guess.",
+    "bn": "কুরআন বা যে ছয়টি হাদিস গ্রন্থে আমি খুঁজি, সেখানে এ বিষয়ে কিছু পাইনি। আমি শুধু এই উৎসগুলো থেকে উত্তর দিই, "
+          "তাই অনুমান করব না।",
+    "ar": "لم أجد شيئًا عن هذا في القرآن أو في كتب الحديث الستة التي أبحث فيها، وأنا لا أجيب إلا منها، فلن أخمّن.",
+}
+
+INTRO = {
+    "en": "I answer questions from the Quran and the six major hadith collections (Bukhari, Muslim, Abu Dawud, "
+          "Tirmidhi, Nasa'i and Ibn Majah). I quote the passages I find and cite each one, and when they don't "
+          "answer your question I say I'm not sure. I don't give fatwas: for rulings, please ask a qualified "
+          "scholar.",
+    "bn": "আমি কুরআন এবং ছয়টি প্রধান হাদিস গ্রন্থ (বুখারী, মুসলিম, আবু দাউদ, তিরমিযী, নাসাঈ ও ইবনে মাজাহ) থেকে "
+          "প্রশ্নের উত্তর দিই। যে অংশগুলো পাই সেগুলো উদ্ধৃত করি এবং প্রতিটির সূত্র দিই; উৎসে উত্তর না থাকলে বলি "
+          "আমি নিশ্চিত নই। আমি ফতোয়া দিই না: বিধানের জন্য একজন যোগ্য আলেমকে জিজ্ঞাসা করুন।",
+    "ar": "أجيب عن الأسئلة من القرآن ومن كتب الحديث الستة (البخاري ومسلم وأبي داود والترمذي والنسائي وابن ماجه). "
+          "أقتبس النصوص التي أجدها وأذكر مصدر كل منها، وإذا لم تُجب عن سؤالك قلت إنني لست متأكدًا. "
+          "لا أصدر فتاوى: للأحكام يُرجى سؤال عالم مختص.",
+}
+SALAM_REPLY = {"en": "Wa alaikum assalam. ", "bn": "ওয়া আলাইকুমুস সালাম। ", "ar": "وعليكم السلام. "}
+
 
 def format_evidence(hits: list, max_chars: int = 1200) -> str:
     """hits: retrieve.Hit objects or dicts from Hit.to_dict()."""
@@ -37,7 +61,8 @@ def format_evidence(hits: list, max_chars: int = 1200) -> str:
         if meta.get("grades"):
             lines.append("Grading: " + "; ".join(f"{g['grade']} ({g['name']})" for g in meta["grades"][:3]))
         for t in d["texts"]:
-            text = t["text"] if len(t["text"]) <= max_chars else t["text"][:max_chars] + " …"
+            text = strip_footnotes(t["text"])
+            text = text if len(text) <= max_chars else text[:max_chars] + " …"
             lines.append(f"({t['lang']}) {text}")
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)

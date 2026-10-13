@@ -22,6 +22,33 @@ questions about the Quran (recall@5 0.425 → 0.575). E5 on its own is weaker th
 and poor on Arabic (Quran/ar recall@5 0.100, hadith/ar 0.200), so it only pays off combined with
 keyword search, which is what `/ask` does.
 
+## With a cross-encoder reranker
+
+Measured 2026-10-12 with `RERANKER=BAAI/bge-reranker-v2-m3 python -m tools.evaluate --modes hybrid`:
+hybrid search fetches 30 candidates and the reranker, which reads the question and each passage together,
+orders them (best score over the Arabic, English and Bangla editions). Scoped:
+
+| group | n | recall@1 | recall@5 | recall@10 | MRR@10 |
+|---|---|---|---|---|---|
+| all, hybrid | 98 | 0.459 | 0.684 | 0.806 | 0.567 |
+| **all, hybrid + rerank** | 98 | **0.663** | **0.827** | **0.867** | **0.736** |
+| Quran, English | 40 | 0.425 → 0.625 | 0.575 → 0.800 | 0.700 → 0.825 | 0.504 → 0.688 |
+| Quran, Bangla | 15 | 0.533 → 0.800 | 0.733 → 0.800 | 0.800 → 0.800 | 0.617 → 0.800 |
+| Quran, Arabic | 10 | 0.200 → 0.900 | 0.700 → 1.000 | 0.800 → 1.000 | 0.448 → 0.950 |
+| Hadith, English | 23 | 0.522 → 0.522 | 0.739 → 0.783 | 0.913 → 0.870 | 0.619 → 0.652 |
+| Hadith, Bangla | 5 | 0.400 → 0.800 | 0.800 → 0.800 | 1.000 → 1.000 | 0.629 → 0.829 |
+| Hadith, Arabic | 5 | 0.800 → 0.600 | 1.000 → 1.000 | 1.000 → 1.000 | 0.850 → 0.800 |
+
+Search takes about 0.34 s per side instead of 0.05 s (RTX 3090, half precision); `/ask` searches both
+sides, so about 0.7 s more per question.
+
+Its scores (0 to 1) also give a usable relevance floor where E5 similarity didn't: on-topic hadith have
+a median score of 0.97, off-topic pairs 0.001. Quran verses score lower (median 0.17) because Pickthall's
+1930 English uses different words from modern questions ("usury", "steadfastness"). A floor of
+`RERANK_MIN=0.01` keeps 84% of on-topic Quran pairs and 99% of hadith, and removes about 93% of
+off-topic pairs (`tools.calibrate_relevance`). The answer-level effect is in `docs/INFERENCE_REVIEW.md`,
+"With the reranker".
+
 ## Answers: base Qwen3-4B vs fine-tuned
 
 Measured 2026-10-12 with `python -m tools.eval_answers`: 98 gold questions plus 14 unanswerable
@@ -33,9 +60,9 @@ accumulation 8), either for 20 steps or the full 2 epochs (144 steps). Run detai
 
 | model | pass | pass, actually answering | fail | cites an expected source | "not sure" to answerable | trick: "not sure" | trick: cited anyway |
 |---|---|---|---|---|---|---|---|
-| base Qwen3-4B | 18 | 11 | 28 | **60** | 5 | 11/14 | 3/14 |
-| fine-tuned, 20 steps | 42 | 12 | 32 | 41 | 29 | **14/14** | **0/14** |
-| **fine-tuned, 144 steps** | **57** | **32** | **22** | 39 | 6 | 13/14 | 1/14 |
+| base Qwen3-4B | 18 | 18 | 28 | **60** | 5 | 11/14 | 3/14 |
+| fine-tuned, 20 steps | 42 | 23 | 32 | 41 | 29 | **14/14** | **0/14** |
+| **fine-tuned, 144 steps** | **57** | **51** | **22** | 39 | 6 | 13/14 | 1/14 |
 
 "pass" counts a clean "I'm not sure" as correct, so the "actually answering" column shows answers
 that passed without declining.
@@ -43,7 +70,7 @@ that passed without declining.
 What it shows:
 
 - **Fine-tuning made answers more checkable and more honest.** The full fine-tune almost tripled
-  the passing real answers (11 → 32), cut failures (28 → 22), and declined 13 of 14 trick questions
+  the passing real answers (18 → 51), cut failures (28 → 22), and declined 13 of 14 trick questions
   with only one citation-backed answer (base: 3). Its one miss quoted the real, related hadith
   "purity is half of faith" (Muslim 223) for "cleanliness is next to godliness".
 - **A short run over-refuses.** After 20 steps the model declines every trick question, but also

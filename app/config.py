@@ -31,6 +31,19 @@ class Settings:
     top_k: int = field(default_factory=lambda: int(_env("TOP_K", "6")))
     # When an answer fails the citation check, replace it with "I'm not sure" (raw answer kept separately).
     strict_citations: bool = field(default_factory=lambda: _env("STRICT_CITATIONS", "1") != "0")
+    # Semantic similarity (E5 cosine) below which a passage counts as not about the question: it isn't shown
+    # to the model, and citing it is flagged. 0 turns this off. Calibrate with `python -m tools.calibrate_relevance`.
+    min_relevance: float = field(default_factory=lambda: float(_env("MIN_RELEVANCE", "0")))
+    # Cross-encoder that rereads the question with each candidate passage and judges relevance, e.g.
+    # BAAI/bge-reranker-v2-m3. Off when empty. With it, RERANK_MIN (its 0-1 score) replaces MIN_RELEVANCE.
+    reranker: str = field(default_factory=lambda: _env("RERANKER", ""))
+    rerank_min: float = field(default_factory=lambda: float(_env("RERANK_MIN", "0")))
+    rerank_pool: int = field(default_factory=lambda: int(_env("RERANK_POOL", "30")))
+
+    @property
+    def relevance_floor(self) -> float:
+        """The floor for whichever relevance score is in use: the reranker's if one is set, else E5's."""
+        return self.rerank_min if self.reranker else self.min_relevance
 
     @property
     def raw_dir(self) -> Path:

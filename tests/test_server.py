@@ -91,3 +91,55 @@ def test_chat_client_strips_qwen_thinking(monkeypatch):
 
     monkeypatch.setattr(httpx, "post", lambda *a, **k: Resp())
     assert ChatClient(Settings()).chat([]) == "Answer [quran:1:1]"
+
+
+def test_greeting_gets_an_introduction_without_the_model(store):
+    llm = FakeLLM("I am Qasim, a Muslim assistant.")
+    with client_with(store, llm) as c:
+        body = c.post("/ask", json={"question": "Assalamu alaikum, who are you?"}).json()
+    assert body["answer"].startswith("Wa alaikum assalam. I answer questions from the Quran")
+    assert llm.seen is None
+
+
+def test_off_topic_passages_are_dropped_and_off_topic_citations_fail(store):
+    from app.embed import HashingEmbedder, build_index
+
+    emb = HashingEmbedder(dim=256)
+    retriever = Retriever(store, emb, build_index(emb, store.all_ids_and_texts()))
+    question = "Is there compulsion in religion?"
+    rel = retriever.relevance(question, ["quran:2:256", "bukhari:1"])
+    assert rel["quran:2:256"] > rel["bukhari:1"]
+    with client_with(store, FakeLLM("should not be called")) as c:
+        app.state.retriever, app.state.min_relevance = retriever, 0.99
+        body = c.post("/ask", json={"question": "what is the weather in Dhaka today"}).json()
+        app.state.min_relevance = 0.0
+    assert body["sources"] == [] and body["answer"].startswith("I couldn't find anything")
+
+    from app.citations import check_answer
+    report = check_answer('"Actions are judged by intentions" [bukhari:1].', ["quran:2:256", "bukhari:1"], store,
+                          relevance=rel, min_relevance=(rel["quran:2:256"] + rel["bukhari:1"]) / 2)
+    assert report.status == "fail" and {"off_topic_citation", "off_topic_answer"} <= {i.kind for i in report.issues}
+
+
+def test_bangla_full_stop_is_tidied_in_english_answers(store):
+    with client_with(store, FakeLLM('"There is no compulsion in religion." [quran:2:256]।')) as c:
+        body = c.post("/ask", json={"question": "Is there compulsion in religion?"}).json()
+    assert "।" not in body["answer"]
+
+
+def test_e5_floor_fills_k_from_later_candidates(store):
+    from app.retrieve import Hit
+    from app.server import answer_question
+
+    refs = ["quran:2:255", "bukhari:1", "quran:2:256", "quran:1:1", "quran:1:2", "quran:1:3"]
+
+    class FloorRetriever(Retriever):
+        def search_balanced(self, query, k, **_):
+            return [Hit(r, 1.0, ["fts"]) for r in refs[:k]]
+
+        def relevance(self, query, rs):
+            return {r: 0.1 if r in refs[:2] else 0.9 for r in rs}
+
+    llm = FakeLLM('"There is no compulsion in religion." [quran:2:256]')
+    body = answer_question(FloorRetriever(store), llm, "Is there compulsion in religion?", k=2, min_relevance=0.5)
+    assert [s["ref"] for s in body["sources"]] == ["quran:2:256", "quran:1:1"]

@@ -49,3 +49,13 @@ def test_vector_index_roundtrip(store, tmp_path):
     index.save(tmp_path / "idx")
     loaded = VectorIndex.load(tmp_path / "idx")
     assert loaded.embedder_name == "hashing-64" and (loaded.ids == index.ids).all()
+
+
+def test_muslim_numbers_also_match_abd_al_baqi_numbering(store):
+    from app.store import Passage
+
+    store.upsert([Passage("muslim:874", "muslim", "en", "eng-test", "No prayer without the Opening of the Book.",
+                          "hadith-en-test", meta={"alt_number": "394a"})])
+    hits = Retriever(store).search_balanced("Sahih Muslim 394", k=6, mode="fts")
+    assert hits[0].ref == "muslim:874" and "reference" in hits[0].matched_by
+    assert Retriever(store).search_balanced("Muslim 394a", k=6, mode="fts")[0].ref == "muslim:874"
