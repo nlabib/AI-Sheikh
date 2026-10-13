@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
-from app.refs import HADITH_COLLECTIONS, MARKER, expand_marker, find_markers
+from app.refs import HADITH_COLLECTIONS, MARKER, TAFSIR_COLLECTIONS, expand_marker, find_markers
 from app.store import Store
 from app.text import normalize, strip_footnotes, tokenize
 
@@ -69,7 +69,7 @@ _NOT_SURE = re.compile(r"(i'?m not sure|i am not sure|আমি নিশ্চ�
 # A refusal opens by saying so (system prompt rule 4), either "I'm not sure" or "the sources don't cover this".
 _REFUSAL_START = re.compile(r"^\W*(?:i'?m not sure|i am not sure|আমি নিশ্চিত নই|لست متأكد)", re.I)
 _TALKS_ABOUT_SOURCES = re.compile(r"(sources?|provided|উৎস|المصادر|مصادر)", re.I)
-_NEGATION = re.compile(r"(\bnot?\b|n't|\bno\b|নেই|না|নয়|নাই|\bلا\b|\bليس|\bلم\b|\bلن\b)", re.I)
+_NEGATION = re.compile(r"(\bnot?\b|n't|\bno\b|নেই|না|নয়|নাই|\bو?لا\b|\bليس|\bلم\b|\bلن\b)", re.I)
 # Attribution words, matched on normalize()d text with quotations masked.
 _SAYS_QURAN = re.compile(r"(\bqur'?an\b|\bkoran\b|القران|قران|কুরআন|কোরআন)")
 _SAYS_PROPHET = re.compile(r"(\bprophet\b|messenger of allah|\ufdfa|ﷺ|رسول الله|النبي|নবী|রাসূল|রাসুল)")
@@ -129,8 +129,10 @@ def _misattributed(sentence: str, refs: list[str]) -> str | None:
     # The attribution comes before the quotation; quoted text may itself mention the Quran or the Prophet.
     plain = normalize(MARKER.sub(" ", re.split(r"[\"“«]", sentence, maxsplit=1)[0]))
     quran = [r for r in refs if r.startswith("quran:")]
+    # Tafsir explains the Quran, so a sentence citing it may well talk about the Quran.
+    tafsir = [r for r in refs if r.partition(":")[0] in TAFSIR_COLLECTIONS]
     says_quran, says_prophet = bool(_SAYS_QURAN.search(plain)), bool(_SAYS_PROPHET.search(plain))
-    if says_quran and not says_prophet and not quran:
+    if says_quran and not says_prophet and not quran and not tafsir:
         return "attributed to the Quran but cites only hadith"
     if says_prophet and _SAID.search(plain) and not says_quran and quran and len(quran) == len(refs):
         return "attributed to the Prophet but cites only Quran verses"

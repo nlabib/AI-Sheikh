@@ -143,3 +143,9 @@ def test_not_sure_answers_pass_and_are_detected(store):
         assert check_answer(text, EVIDENCE, store).status == "pass"
         assert says_not_sure(text)
     assert not says_not_sure("There is no compulsion in religion [quran:2:256].")
+
+
+def test_sentence_citing_tafsir_may_mention_the_quran(store):
+    from app.citations import _misattributed
+    assert _misattributed("Ibn Kathir says the Quran here means mercy [ibnkathiren:2:1].", ["ibnkathiren:2:1"]) is None
+    assert _misattributed("The Quran says so [bukhari:1].", ["bukhari:1"]) is not None
