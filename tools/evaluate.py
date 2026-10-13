@@ -101,7 +101,8 @@ def main(argv: list[str] | None = None) -> int:
         kind = "hashing" if index.embedder_name.startswith("hashing") else "e5"
         embedder = make_embedder(kind, index.embedder_name)
     reranker = make_reranker(settings.reranker)
-    retriever = Retriever(store, embedder, index, reranker=reranker, rerank_pool=settings.rerank_pool)
+    retriever = Retriever(store, embedder, index, reranker=reranker, rerank_pool=settings.rerank_pool,
+                      tafsir_slots=settings.tafsir_slots)
     modes = args.modes or (["fts", "vector", "hybrid"] if index is not None else ["fts"])
 
     gold = load_gold(args.gold)

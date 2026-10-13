@@ -14,12 +14,19 @@ from pathlib import Path
 from typing import Iterator
 
 from app.config import get_settings
-from app.refs import hadith_ref, quran_ref
+import re
+
+from app.refs import hadith_ref, quran_ref, tafsir_ref
 from app.store import Passage, Store
 from app.surahs import SURAHS
 from tools.sources import Source, select
 
 QURAN_VERSES = 6236
+# Tafsir commentary on one verse runs to tens of thousands of characters; it is split into parts of about this
+# size so that search finds the part about the question and the model is shown that part.
+TAFSIR_CHUNK = 1500
+_EDITOR_NOTE = re.compile(r"\[\[.*?\]\]", re.DOTALL)  # "[[في أ: ...]]": manuscript variants in the Arabic edition
+_SENTENCE_END = re.compile(r"(?<=[.!?؟।])\s+")
 
 
 def _alt_number(n: float | int | str) -> str:
@@ -38,6 +45,51 @@ def quran_passages(src: Source, data: dict) -> Iterator[Passage]:
         meta = {"surah": v["chapter"], "ayah": v["verse"], "surah_name": name, "surah_meaning": meaning}
         yield Passage(quran_ref(v["chapter"], v["verse"]), "quran", src.lang, src.edition, v["text"].strip(),
                       src.source_id, src.allow_training, meta)
+
+
+def chunk_text(text: str, size: int = TAFSIR_CHUNK) -> list[str]:
+    """Split on paragraphs, then sentences, into parts of at most about `size` characters."""
+    pieces: list[str] = []
+    for para in (p.strip() for p in text.split("\n")):
+        if not para:
+            continue
+        pieces += [para] if len(para) <= size else [s for s in _SENTENCE_END.split(para) if s.strip()]
+    chunks: list[str] = []
+    for piece in pieces:
+        while len(piece) > 2 * size:  # a single run-on sentence
+            cut = piece.rfind(" ", 0, size)
+            cut = cut if cut > 0 else size
+            chunks.append(piece[:cut].strip())
+            piece = piece[cut:].strip()
+        if chunks and len(chunks[-1]) + len(piece) + 1 <= size:
+            chunks[-1] += ("\n" if "\n" not in piece else "") + piece
+        else:
+            chunks.append(piece)
+    return chunks
+
+
+def tafsir_passages(src: Source, files: dict[int, list[dict]]) -> Iterator[Passage]:
+    """One passage per part of the commentary. Upstream repeats a group's commentary on every verse in the group;
+    it is kept once, under the group's first verse, with the last verse in meta."""
+    for surah in range(1, 115):
+        entries = sorted(files[surah], key=lambda e: int(e["ayah"]))
+        groups: list[list] = []  # [first ayah, last ayah, text]
+        for e in entries:
+            text = _EDITOR_NOTE.sub("", e["text"]).strip()
+            if not text:
+                continue
+            if groups and groups[-1][2] == text:
+                groups[-1][1] = int(e["ayah"])
+            else:
+                groups.append([int(e["ayah"]), int(e["ayah"]), text])
+        name, meaning, _ = SURAHS[surah]
+        for first, last, text in groups:
+            parts = chunk_text(text)
+            for i, part in enumerate(parts, 1):
+                meta = {"surah": surah, "ayah": first, "ayah_to": last, "part": i, "parts": len(parts),
+                        "surah_name": name, "surah_meaning": meaning}
+                yield Passage(tafsir_ref(src.collection, surah, first, i), src.collection, src.lang, src.edition,
+                              part, src.source_id, src.allow_training, meta)
 
 
 def hadith_passages(src: Source, data: dict) -> Iterator[Passage]:
@@ -71,12 +123,23 @@ def jsonl_passages(path: Path) -> Iterator[Passage]:
                       r.get("source_id", path.stem), bool(r.get("allow_training", False)), r.get("meta", {}))
 
 
+def _search_only(p: Passage) -> Passage:
+    p.meta["search_only"] = True
+    return p
+
+
 def ingest_source(store: Store, src: Source, raw_dir: Path) -> int:
     path = raw_dir / src.filename
     if not path.exists():
         raise FileNotFoundError(f"{path} not found; run `python -m tools.fetch` first")
-    data = json.loads(path.read_text(encoding="utf-8"))
-    rows = quran_passages(src, data) if src.kind == "quran" else hadith_passages(src, data)
+    if src.kind == "tafsir":
+        rows = tafsir_passages(src, {n: json.loads((path / f"{n}.json").read_text(encoding="utf-8"))
+                                     for n in range(1, 115)})
+    else:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        rows = quran_passages(src, data) if src.kind == "quran" else hadith_passages(src, data)
+    if not src.display:
+        rows = (_search_only(p) for p in rows)
     n = store.upsert(rows)
     store.record_source(src.source_id, src.info())
     return n

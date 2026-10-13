@@ -13,7 +13,7 @@ import numpy as np
 
 from app.embed import Embedder, VectorIndex
 from app.rerank import Reranker
-from app.refs import HADITH_COLLECTIONS, find_explicit_refs, parse_ref
+from app.refs import HADITH_COLLECTIONS, TAFSIR_COLLECTIONS, TAFSIR_LANGS, find_explicit_refs, parse_ref
 from app.store import Passage, Store
 from app.text import detect_lang, strip_footnotes
 
@@ -64,8 +64,9 @@ class Hit:
 
 class Retriever:
     def __init__(self, store: Store, embedder: Embedder | None = None, index: VectorIndex | None = None,
-                 reranker: Reranker | None = None, rerank_pool: int = RERANK_POOL):
+                 reranker: Reranker | None = None, rerank_pool: int = RERANK_POOL, tafsir_slots: int = 1):
         self.store = store
+        self.tafsir_slots = tafsir_slots
         self.reranker = reranker
         self.rerank_pool = rerank_pool
         self.embedder = embedder
@@ -149,10 +150,17 @@ class Retriever:
             sides.append(self.search(query, k=per_side, mode=mode, collections=["quran"]))
         if hadith:
             sides.append(self.search(query, k=per_side, mode=mode, collections=hadith))
+        # Tafsir in the question's language: a passage or two of commentary, never crowding out the texts.
+        lang = detect_lang(query)
+        tafsir = [c for c in TAFSIR_COLLECTIONS
+                  if TAFSIR_LANGS[c] == lang and (not collections or c in collections)]
+        tafsir_side = (self.search(query, k=max(per_side // 2, self.tafsir_slots), mode=mode, collections=tafsir)
+                       if tafsir and self.tafsir_slots > 0 and self.store.has_collections(tafsir) else [])
         if self.reranker is not None and min_rerank > 0:
-            sides = [[h for h in side if "reference" in h.matched_by or (h.rerank or 0.0) >= min_rerank]
-                     for side in sides]
-        explicit = [h for side in sides for h in side if "reference" in h.matched_by]
+            sides, tafsir_side = [[h for h in side if "reference" in h.matched_by or (h.rerank or 0.0) >= min_rerank]
+                                  for side in (*sides, tafsir_side)][:-1], \
+                [h for h in tafsir_side if "reference" in h.matched_by or (h.rerank or 0.0) >= min_rerank]
+        explicit = [h for side in (*sides, tafsir_side) for h in side if "reference" in h.matched_by]
         explicit.sort(key=lambda h: -h.score)
         seen = {h.ref for h in explicit}
         rest: list[Hit] = []
@@ -161,8 +169,13 @@ class Retriever:
                 if h is not None and h.ref not in seen:
                     rest.append(h)
                     seen.add(h.ref)
+        commentary = [h for h in tafsir_side if h.ref not in seen][:self.tafsir_slots]
         # A whole named surah can fill k by itself; still leave room for passages about the question.
-        return explicit + rest[:max(k - len(explicit), k // 2)]
+        room = max(k - len(explicit), k // 2)
+        if commentary:
+            texts = rest[:room - len(commentary)]
+            rest = texts[:2] + commentary + texts[2:]
+        return explicit + rest[:room]
 
     def explicit_refs(self, query: str) -> list[str]:
         """Typed references that exist in the corpus. "Muslim 394" also finds the hadith whose
@@ -212,7 +225,13 @@ class Retriever:
         return explicit + sorted((h for h in hits if "reference" not in h.matched_by), key=lambda h: -h.rerank)
 
     def _ordered(self, ref: str, query: str) -> list[Passage]:
-        """All editions of a ref: the question's language first, then Arabic, then the rest."""
+        """The editions shown for a ref, one per language: the question's language first, then Arabic, then the
+        rest. Translations kept only for search are left out."""
         lang = detect_lang(query)
         order = {lang: 0, "ar": 1}
-        return sorted(self.store.by_ref(ref), key=lambda p: (order.get(p.lang, 2), p.lang))
+        shown, langs = [], set()
+        for p in sorted(self.store.by_ref(ref), key=lambda p: (order.get(p.lang, 2), p.lang)):
+            if not p.meta.get("search_only") and p.lang not in langs:
+                shown.append(p)
+                langs.add(p.lang)
+        return shown

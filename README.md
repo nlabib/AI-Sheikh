@@ -92,7 +92,8 @@ Environment variables (see `app/config.py`): `LM_BASE_URL` (default
 download, rereads each candidate passage with the question and reorders them; scoped recall@5 0.684 → 0.827,
 about 0.7 s per question on a GPU), `RERANK_MIN` (the reranker's 0-1 score below which a passage counts as
 off topic, used instead of `MIN_RELEVANCE` when `RERANKER` is set; 0.01 worked well, see
-`docs/INFERENCE_REVIEW.md`) and `RERANK_POOL` (candidates per side handed to the reranker, default 30).
+`docs/INFERENCE_REVIEW.md`), `RERANK_POOL` (candidates per side handed to the reranker, default 30) and
+`TAFSIR_SLOTS` (how many of the `TOP_K` sources may be tafsir in the question's language, default 1; 0 turns tafsir off).
 
 ## Sources and licences
 

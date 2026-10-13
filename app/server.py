@@ -31,15 +31,18 @@ def build_retriever(settings) -> tuple[Retriever, str]:
     rerank_note = f", reranked by {settings.reranker}" if reranker else ""
     index = VectorIndex.load(settings.index_dir)
     if index is None:
-        return (Retriever(store, reranker=reranker, rerank_pool=settings.rerank_pool),
+        return (Retriever(store, reranker=reranker, rerank_pool=settings.rerank_pool,
+                      tafsir_slots=settings.tafsir_slots),
                 f"fts only (no vector index; run `python -m tools.index`){rerank_note}")
     embedder_kind = "hashing" if index.embedder_name.startswith("hashing") else "e5"
     if embedder_kind == "hashing" and settings.embedder != "hashing":
         # The hashing fallback makes hybrid results worse than FTS alone (docs/RESULTS.md).
-        return (Retriever(store, reranker=reranker, rerank_pool=settings.rerank_pool),
+        return (Retriever(store, reranker=reranker, rerank_pool=settings.rerank_pool,
+                      tafsir_slots=settings.tafsir_slots),
                 f"fts only (ignoring hashing index; set EMBEDDER=hashing to use it){rerank_note}")
     embedder = make_embedder(embedder_kind, index.embedder_name if embedder_kind == "e5" else "")
-    return (Retriever(store, embedder, index, reranker=reranker, rerank_pool=settings.rerank_pool),
+    return (Retriever(store, embedder, index, reranker=reranker, rerank_pool=settings.rerank_pool,
+                      tafsir_slots=settings.tafsir_slots),
             f"hybrid (fts + {index.embedder_name}){rerank_note}")
 
 
