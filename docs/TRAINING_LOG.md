@@ -265,6 +265,10 @@ Things that went wrong on the way, so you don't repeat them:
 
 ### The data (`python -m tools.build_sft --per-kind 120 --topics`, `tools/sft_topics.py`)
 
+> This dataset was built with `--topics` and `tools/sft_topics.py`, which exist only on the unmerged branch
+> `claude/retrain-v2` (the model it produced scored worse, so they are not on `main`). The command will not
+> run from `main`; it is recorded here for the history.
+
 | kind | n | what it teaches |
 |---|---|---|
 | quran_lookup, hadith_lookup, no_answer, missing_ref | 120 each | as before |
