@@ -235,3 +235,94 @@ charts: `docs/TRAINING_GUIDE.md`, "Watching training".
    the prompt format it was trained on.
 7. **Training charts** (`training/train_cuda.py`, `training/summary_to_tensorboard.py`): TensorBoard
    logging by default, eval loss every 20 steps, GPU memory/utilisation charts.
+
+## Second fine-tune (v2), 2026-10-14
+
+Goal: fix the weaknesses found in `docs/INFERENCE_REVIEW.md` (one-source answers, quoting drift, `[1]`
+markers) with better training data, and train shorter. **Result: v2 is worse than the first fine-tune and
+is not used.** Along the way we found and fixed a bug that had been garbling Bangla quotes in LM Studio all
+along. The bug fix is the real gain.
+
+### Where it ran
+
+- **Windows blocked it first.** Windows Smart App Control started refusing two unsigned library files
+  (`regex`, `tokenizers`) that transformers needs, so nothing that tokenizes could run on Windows. Changing
+  that security setting was the owner's call; they chose WSL2.
+- **WSL2 (Ubuntu 26.04):** `uv` for Python 3.12, torch 2.6 + cu124, the same library versions as on
+  Windows. The corpus, index and models were copied from the Windows side (no re-download). 77 tests pass.
+  Two runs there died when the WSL VM was shut down (it uses a lot of RAM), so training moved to the cloud.
+- **RunPod, RTX A6000 (48 GB), Secure Cloud, $0.59/h**, official PyTorch 2.8 template, SSH with a key made
+  for this. Code and data went up as a 0.7 MB tarball, the adapter (245 MB) came back by `scp`, and the pod
+  was deleted right after. About 35 minutes, **about $0.35**. Script: `training/runpod_train.sh`.
+
+Things that went wrong on the way, so you don't repeat them:
+- Batch 4 on the A6000 ran at 92 s per step (every batch padded to its longest example, up to 4,096
+  tokens). Batch 1 × accumulation 16 ran at 22 s per step.
+- `tar` needs `--no-same-owner` on the pod's `/workspace` disk.
+- `pkill -f <pattern>` over SSH can match the remote shell's own command line and kill the connection.
+  Kill by PID, or launch through a script file.
+- Detach long runs with `setsid … < /dev/null &`, so they survive a dropped connection.
+
+### The data (`python -m tools.build_sft --per-kind 120 --topics`, `tools/sft_topics.py`)
+
+> This dataset was built with `--topics` and `tools/sft_topics.py`, which exist only on the unmerged branch
+> `claude/retrain-v2` (the model it produced scored worse, so they are not on `main`). The command will not
+> run from `main`; it is recorded here for the history.
+
+| kind | n | what it teaches |
+|---|---|---|
+| quran_lookup, hadith_lookup, no_answer, missing_ref | 120 each | as before |
+| topic_hadith / topic_quran / topic_mixed | 134 / 8 / 3 | a topic question answered by quoting 2–3 passages the reranker is confident about (hadith ≥ 0.8, Quran ≥ 0.3), other passages left as distractors |
+| topic_unrelated | 110 | sources retrieved for a different topic → "I'm not sure, these sources are about other matters" |
+| surah_lookup | 60 | a short surah quoted ayah by ayah, one marker each |
+
+The Quran bar is high on purpose. At 0.1–0.2, the reranker accepted tangential verses (5:45 on
+retaliation for "charity"), and those would teach the wrong habit. The cost is that Quran topic examples
+are few.
+
+### Training
+
+`training/configs/qwen3-4b-24gb-v2.yaml`: 1 epoch, 46 steps, batch 1 × 16. **16.6 minutes**, peak VRAM 12.9 GB.
+
+| step | train loss | valid loss |
+|---|---|---|
+| 0 | | 1.564 |
+| 10 | 0.320 | 0.187 |
+| 20 | 0.056 | 0.039 |
+| 30 | 0.012 | 0.021 |
+| 46 | | **0.015** |
+
+Healthier than the first run (train loss ~0.0001, i.e. memorised): the curve flattens instead of collapsing.
+
+### The Bangla bug: য় and ড়
+
+v2's first test failed more often, and many failures were garbled Bangla quotes ("শয়তান" → "শতান", "খায়" →
+"খাড়াবে"), the same corruption the first model showed. With the same prompt at temperature 0, LM Studio
+counted **4,664** tokens and Hugging Face **4,736**. Comparing word by word, every mismatch contained
+**য় (U+09DF)** or **ড় (U+09DC)**. The corpus stores these letters as single code points. Qwen's tokenizer
+applies Unicode **NFC** normalization first, which turns each into two (য + nukta), and Qwen was trained on
+that form. llama.cpp (inside LM Studio) does not normalize. So those words reached the model as byte
+sequences it had hardly seen, and it garbled exactly them when quoting. This affects any Qwen GGUF in LM
+Studio.
+
+**Fix:** `app/prompts.build_messages` NFC-normalizes the prompt (`tests/test_prompts.py`). Afterwards LM
+Studio counts 4,736 tokens, identical, and the Bangla comes out clean.
+
+### Results (with the fix, reranker on, `RERANK_MIN=0.01`, `tools.eval_answers`)
+
+| model | pass | fail | real answers passing | cites an expected source | sources per answer | trick: "not sure" / cited anyway |
+|---|---|---|---|---|---|---|
+| first fine-tune, before the fix | 66 | 14 | 62 | 62 | 1.2 | 12 / 1 |
+| **first fine-tune, with the fix** | **71** | **13** | **66** | **64** | 1.2 | 12 / 1 |
+| v2, with the fix | 60 | 24 | 56 | 59 | 1.5 | 11 / 0 |
+
+v2 did learn to use more sources (1.5 per answer), but its quoting got worse, and that's what fails. Of the
+18 questions v2 fails and the first model passes, the pattern is:
+- **dropped words mid-quote** without "…" (5:90 loses "and idols and divining arrows");
+- **transliteration inside quote marks** ("Shahrur Ramadan al-ladhi…");
+- **uncited verdicts up front** ("Alcohol and gambling are prohibited in Islam").
+
+**Lesson:** the topic examples quoted *excerpts* (the opening sentences of a passage). A 4B model
+generalised that to "cutting words is fine". To teach multi-source answers without this, quote whole
+passages, or mark every cut with "…" and teach the checker to accept it. And keep the first model:
+`ai-sheikh-ft` with the NFC fix is the best combination so far.
