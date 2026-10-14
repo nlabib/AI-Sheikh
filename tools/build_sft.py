@@ -201,10 +201,27 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--valid-share", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--out-dir", type=Path, default=SFT_DIR)
+    ap.add_argument("--topics", action="store_true",
+                    help="add multi-source topic answers, unrelated-source refusals and whole short surahs "
+                         "(tools/sft_topics.py); needs the E5 index and RERANKER set")
     args = ap.parse_args(argv)
 
-    store = Store(get_settings().db_path)
+    settings = get_settings()
+    store = Store(settings.db_path)
     examples = build(store, args.per_kind, args.seed)
+    if args.topics:
+        from app.server import build_retriever
+        from tools.sft_topics import surah_examples, topic_examples
+
+        gold = [json.loads(line) for line in GOLD.read_text(encoding="utf-8").splitlines() if line.strip()]
+        gold_refs = {r for g in gold for r in g["relevant"]}
+        gold_queries = {g["query"] for g in gold}
+        retriever, note = build_retriever(settings)
+        print(f"retrieval for topic examples: {note}")
+        rng = random.Random(args.seed + 1)
+        items = topic_examples(store, retriever, rng, gold_refs, gold_queries)
+        items += surah_examples(store, rng, gold_refs)
+        examples += [_to_example(item) for item in items]
     reviewed_dir = args.out_dir / "reviewed"
     reviewed = []
     for path in sorted(reviewed_dir.glob("*.jsonl")) if reviewed_dir.exists() else []:
