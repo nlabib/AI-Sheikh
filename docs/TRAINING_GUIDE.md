@@ -336,7 +336,7 @@ memorised them (training loss near 0 by step 30). Round 2 changes the data, not 
 Run these in the project folder with the virtual environment active. Times are rough guesses for an RTX 3090.
 
 ```bash
-git pull                                   # on branch claude/benchmark-corpus-v2 until PR #6 is merged
+git checkout main && git pull             # Round 2 is on main (PR #6)
 python -m tools.fetch                      # about 260 MB of new files; already-downloaded ones are skipped
 python -m tools.ingest                     # corpus grows from ~121,000 to ~177,500 passages
 python -m tools.index                      # rebuild the E5 search index for the new passages
@@ -358,6 +358,92 @@ RERANKER=BAAI/bge-reranker-v2-m3 RERANK_MIN=0.01 LM_MODEL=ai-sheikh-v2 python -m
 Compare `good` and `wrong` per language and category in the two reports, and read the starred (scholar-review)
 items in `results/bench-ft-v2.md` yourself.
 
+## Round 2 on Windows: run it inside WSL2
+
+On the RTX 3090 PC, Windows Smart App Control blocks two compiled libraries the pipeline needs (`regex` and
+`tokenizers`: "An Application Control policy has blocked this file"). Without them nothing that tokenizes text can
+run: training, `build_sft`, E5 search or the reranker. WSL2 runs a real Ubuntu inside Windows, with the same GPU,
+and Smart App Control does not apply to programs running inside it. So keep Smart App Control on and do Round 2
+in WSL2. LM Studio stays on Windows.
+
+**Downloads in this section:** Ubuntu is about 700 MB, and PyTorch for CUDA plus the training packages about
+4 GB. Copying the models you already downloaded on Windows (below) saves another ~10 GB.
+
+### 1. Install Ubuntu (once)
+
+In **PowerShell as Administrator**:
+
+```powershell
+wsl --install -d Ubuntu-24.04
+```
+
+Restart when asked. Ubuntu opens and asks for a Linux user name and password (they are separate from Windows).
+Do **not** install an NVIDIA driver inside Ubuntu: the Windows driver already serves the GPU to WSL. Check:
+
+```bash
+nvidia-smi          # must list the RTX 3090
+```
+
+### 2. Let Ubuntu reach LM Studio (once)
+
+The benchmark talks to LM Studio's server on Windows. On Windows 11 the simplest way is *mirrored networking*,
+which makes `127.0.0.1` the same address on both sides. Create `C:\Users\<you>\.wslconfig` containing:
+
+```ini
+[wsl2]
+networkingMode=mirrored
+```
+
+then run `wsl --shutdown` in PowerShell and open Ubuntu again. Check with `curl http://127.0.0.1:1234/v1/models`
+while LM Studio's server is running. If that fails (older Windows), turn on *Serve on Local Network* in LM
+Studio's server settings and use
+`export LM_BASE_URL=http://$(ip route show default | awk '{print $3}'):1234/v1` instead; Windows Firewall may ask
+to allow LM Studio.
+
+### 3. Set up the project inside Ubuntu
+
+Keep the project in Ubuntu's own disk (`~`), not under `/mnt/c`: reading thousands of small files across the
+Windows boundary is many times slower.
+
+```bash
+sudo apt update && sudo apt install -y git python3-venv python3-pip build-essential cmake
+git clone https://github.com/nlabib/AI-Sheikh.git ~/AI-Sheikh
+cd ~/AI-Sheikh
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+pip install torch --index-url https://download.pytorch.org/whl/cu124
+pip install -r requirements-train-cuda.txt -r requirements-embed.txt
+python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"   # True, RTX 3090
+python -m pytest -q
+```
+
+Reuse what Windows already downloaded (your Windows drive is at `/mnt/c`). Change `labib` and the project path if
+yours differ:
+
+```bash
+cp -r /mnt/c/Users/labib/src/AI-Sheikh/data/raw data/            # round-1 texts; fetch checks their checksums
+mkdir -p ~/.cache && cp -rL /mnt/c/Users/labib/.cache/huggingface ~/.cache/   # Qwen3-4B, E5, reranker
+```
+
+### 4. Run Round 2
+
+Run the commands in the Round 2 section above, in `~/AI-Sheikh` with the virtual environment active. Before the
+training command, **unload the model in LM Studio** so the GPU's 24 GB is free for training. The Windows-only
+settings from round 1 still apply (batch 2, gradient accumulation 8, already in `qwen3-4b-24gb-v2.yaml`).
+
+### 5. Get the new model into LM Studio
+
+Merge and convert as in Step 8 (with `outputs/ai-sheikh-v2`), then copy the `.gguf` to where LM Studio looks for
+models, for example:
+
+```bash
+mkdir -p /mnt/c/Users/labib/.lmstudio/models/local/ai-sheikh-v2
+cp outputs/ai-sheikh-v2-Q4_K_M.gguf /mnt/c/Users/labib/.lmstudio/models/local/ai-sheikh-v2/
+```
+
+Load it in LM Studio as `ai-sheikh-v2` and run the final benchmark from Ubuntu. Leave the old GGUFs on Windows
+where they are.
+
 ## When things go wrong
 
 | Symptom | Likely cause and fix |
@@ -369,6 +455,7 @@ items in `results/bench-ft-v2.md` yourself.
 | valid loss rises while train loss falls | memorising; stop earlier (fewer epochs) |
 | Model writes `<think>` blocks | Qwen3's reasoning mode; the server strips them, and the training data uses non-thinking mode |
 | `bitsandbytes` errors on Windows | run inside WSL2 Ubuntu rather than native Windows |
+| "An Application Control policy has blocked this file" | Windows Smart App Control; use WSL2 (see "Round 2 on Windows") |
 
 ## Glossary
 
