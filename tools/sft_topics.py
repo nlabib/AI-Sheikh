@@ -110,8 +110,11 @@ UNRELATED = {
 
 # How sure the reranker must be before a passage is quoted as answering the question. Quran verses score lower
 # against modern wording (Pickthall, 1930), so their bar is lower; see docs/RESULTS.md.
-QUOTE_MIN = {"quran": 0.2, "hadith": 0.6}
-UNRELATED_MAX = 0.02
+QUOTE_MIN = {"quran": 0.3, "hadith": 0.8}
+UNRELATED_MAX = 0.05
+# Share of questions that also get an unrelated-sources refusal. Every one qualifies, and too many refusals
+# teach the model to refuse questions it could answer.
+UNRELATED_SHARE = 0.25
 EXCERPT_CHARS = 280
 _SENTENCE_END = re.compile(r"(?<=[.!?;])\s+")
 # The Prophet's words in the Arabic hadith texts sit between quote marks, often wrapped in RLM marks.
@@ -171,47 +174,52 @@ def topic_examples(store: Store, retriever: Retriever, rng: random.Random, gold_
     if retriever.reranker is None:
         raise SystemExit("topic examples need the reranker (RERANKER=BAAI/bge-reranker-v2-m3) and the E5 index")
     out: list[dict] = []
-    end = {"en": "", "bn": "।", "ar": ""}
     for i, names in enumerate(TOPICS):
         for style in ("quran", "hadith", "mixed"):
+            collections = (["quran"] if style == "quran" else
+                           list(HADITH_COLLECTIONS) if style == "hadith" else None)
             for li, lang in enumerate(("en", "bn", "ar")):
                 t = names[li]
-                q = rng.choice(QUESTIONS[style][lang]).format(t=t)
-                if q in gold_queries:
-                    continue
-                collections = (["quran"] if style == "quran" else
-                               list(HADITH_COLLECTIONS) if style == "hadith" else None)
-                hits = retriever.search_balanced(q, k=6, collections=collections, min_rerank=0.01)
-                chosen = [h for h in hits if h.ref not in gold_refs and (h.rerank or 0) >= QUOTE_MIN[_side(h.ref)]]
-                if style == "mixed":
-                    chosen = ([h for h in chosen if _side(h.ref) == "quran"][:1] +
-                              [h for h in chosen if _side(h.ref) == "hadith"][:2])
-                    if {_side(h.ref) for h in chosen} != {"quran", "hadith"}:
+                for template in QUESTIONS[style][lang]:  # every wording, not one at random: more examples
+                    q = template.format(t=t)
+                    if q in gold_queries:
                         continue
-                chosen = chosen[:3]
-                if len(chosen) < 2:
-                    continue
-                prompt_hits = [h2 for h2 in (_trainable(store, h.ref) for h in hits) if h2]
-                lines = [line for line in (_cite(h, lang) for h in
-                         (next(x for x in prompt_hits if x.ref == c.ref) for c in chosen)) if line]
-                if len(lines) < 2:
-                    continue
-                intro = rng.choice(INTROS[style][lang]).format(t=t)
-                answer = intro + "\n\n" + "\n\n".join(line + end[lang] for line in lines)
-                out.append({"question": q, "lang": lang, "hits": prompt_hits, "answer": answer,
-                            "kind": f"topic_{style}"})
-
-                # The same question, shown passages retrieved for a different topic: nothing to quote.
-                other = TOPICS[(i + rng.randrange(1, len(TOPICS))) % len(TOPICS)]
-                q_other = rng.choice(QUESTIONS[style][lang]).format(t=other[li])
-                other_hits = retriever.search_balanced(q_other, k=6, collections=collections, min_rerank=0.01)
-                scores = retriever.rerank_scores(q, [h.ref for h in other_hits])
-                if other_hits and max(scores.values(), default=1.0) < UNRELATED_MAX:
-                    unrelated = [h2 for h2 in (_trainable(store, h.ref) for h in other_hits) if h2]
-                    out.append({"question": q, "lang": lang, "hits": unrelated,
-                                "answer": rng.choice(UNRELATED[lang]).format(t=t), "kind": "topic_unrelated"})
+                    item = _topic_answer(store, retriever, rng, q, t, style, lang, collections, gold_refs)
+                    if item:
+                        out.append(item)
+                    # The same question shown passages retrieved for a different topic: nothing to quote.
+                    if rng.random() > UNRELATED_SHARE:
+                        continue
+                    other = TOPICS[(i + rng.randrange(1, len(TOPICS))) % len(TOPICS)]
+                    q_other = rng.choice(QUESTIONS[style][lang]).format(t=other[li])
+                    other_hits = retriever.search_balanced(q_other, k=6, collections=collections, min_rerank=0.01)
+                    scores = retriever.rerank_scores(q, [h.ref for h in other_hits])
+                    if other_hits and max(scores.values(), default=1.0) < UNRELATED_MAX:
+                        unrelated = [h2 for h2 in (_trainable(store, h.ref) for h in other_hits) if h2]
+                        out.append({"question": q, "lang": lang, "hits": unrelated,
+                                    "answer": rng.choice(UNRELATED[lang]).format(t=t), "kind": "topic_unrelated"})
         log(f"  topic {i + 1}/{len(TOPICS)} {names[0]}: {len(out)} examples so far")
     return out
+
+
+def _topic_answer(store: Store, retriever: Retriever, rng: random.Random, q: str, t: str, style: str, lang: str,
+                  collections: list[str] | None, gold_refs: set[str]) -> dict | None:
+    """2-3 passages the reranker is confident about, quoted word for word; the rest stay as distractors."""
+    hits = retriever.search_balanced(q, k=6, collections=collections, min_rerank=0.01)
+    chosen = [h for h in hits if h.ref not in gold_refs and (h.rerank or 0) >= QUOTE_MIN[_side(h.ref)]]
+    if style == "mixed":
+        chosen = ([h for h in chosen if _side(h.ref) == "quran"][:1] +
+                  [h for h in chosen if _side(h.ref) == "hadith"][:2])
+        if {_side(h.ref) for h in chosen} != {"quran", "hadith"}:
+            return None
+    prompt_hits = [h2 for h2 in (_trainable(store, h.ref) for h in hits) if h2]
+    by_ref = {h.ref: h for h in prompt_hits}
+    lines = [line for line in (_cite(by_ref[c.ref], lang) for c in chosen[:3] if c.ref in by_ref) if line]
+    if len(lines) < 2:
+        return None
+    end = "।" if lang == "bn" else ""
+    answer = rng.choice(INTROS[style][lang]).format(t=t) + "\n\n" + "\n\n".join(line + end for line in lines)
+    return {"question": q, "lang": lang, "hits": prompt_hits, "answer": answer, "kind": f"topic_{style}"}
 
 
 SURAH_QUESTIONS = {"en": ["Show me Surah {n}.", "Recite Surah {n}.", "What does Surah {n} say?"],
