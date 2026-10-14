@@ -326,3 +326,82 @@ v2 did learn to use more sources (1.5 per answer), but its quoting got worse, an
 generalised that to "cutting words is fine". To teach multi-source answers without this, quote whole
 passages, or mark every cut with "…" and teach the checker to accept it. And keep the first model:
 `ai-sheikh-ft` with the NFC fix is the best combination so far.
+
+## Round 2 on Qwen3-8B, 2026-10-14
+
+The owner asked for "bigger and better" and chose the 8B model going forward. This run uses round 2 as it is
+on `main` (new sources, 582 checked multi-source answers, learning rate 1e-4) on **Qwen3-8B**, trained in
+the cloud.
+
+### Preparation (in WSL)
+
+| Step | Result |
+|---|---|
+| `tools.fetch` + `tools.ingest` | corpus 121,064 → **177,529** passages (Muwatta, Nawawi 40, Hadith Qudsi, Ibn Kathir and Jalalayn tafsir, more translations) |
+| `tools.index` | E5 index rebuilt for all of them |
+| `tools.build_sft` | 1,123 train / 59 valid: multi_source 223, partial 82, concise 83, disputed 56, distractor_decline 115, plus 564 templates |
+| baseline | `tools.benchmark` on the round-1 4B (`ai-sheikh-ft`): **good 112, refused 91, wrong 97** of 300 (24 min) |
+
+### Training on RunPod
+
+`training/configs/qwen3-8b-48gb-round2.yaml` (2 epochs, lr 1e-4, LoRA r32, batch 1 × 16) on an RTX A6000,
+Secure Cloud, $0.59/h, with the owner's limits: 100 GB of storage, a 4-hour self-delete timer, at most $3.
+
+| | |
+|---|---|
+| Training | **63 min**, 142 steps, ~25 s/step, peak VRAM 19.1 GB |
+| Loss | train 0.25, valid 0.28 at the end: it learned the patterns without memorising (round 1 reached ~0.0001) |
+| Packaging | merged and converted **on the pod** to Q8_0 (8.7 GB), so the 16 GB base model never came home (`training/runpod_package.sh`) |
+| Download | GGUF and adapter (325 MB), checksums verified |
+| Cost | pod 10:26–11:44 UTC, **about $0.79**; pod and its storage deleted, no network volumes left |
+
+In LM Studio: `ai-sheikh-8b-v2`, 11.4 GB of GPU memory with a 16k context.
+
+### Benchmark: round-1 4B vs round-2 8B (300 questions, reranker on)
+
+| | 4B round 1 | **8B round 2** |
+|---|---|---|
+| good | 112 | **129–130** |
+| refused | 91 | 51–58 |
+| "wrong" | 97 | 113–119 |
+| trick questions handled | 48/50 | 42–45/50 |
+
+(Two 8B runs; answers vary a little between runs because of sampling.)
+
+| category | n | 4B good | 8B good |
+|---|---|---|---|
+| quran_locate | 35 | 21 | 23 |
+| quran_content | 28 | 10 | 13 |
+| hadith_content | 27 | 5 | 10 |
+| hadith_locate | 26 | 3 | 6 |
+| fiqh_ruling | 31 | 4 | 7 |
+| tafsir | 15 | 10 | 10 |
+| Bangla, all | 80 | 23 | 27–28 |
+
+**"Wrong" is not the same as incorrect.** The benchmark counts an answer as wrong when it doesn't cite one
+of the sources it lists. Reading 12 of the 8B's "wrong" answers (questions the 4B had declined): **7 were
+actually good**, citing other valid sources (silk and gold for men from Muslim 5426 and Ibn Majah 3590; both
+views on reciting al-Fatiha behind the imam, in Arabic and Bangla), 3 were weak, and 2 were wrong.
+
+**Where the 8B is worse: questions about things that don't exist.** It is more eager to answer, and 4 of its
+trick-question misses are misleading. Asked for "verse 7 of an-Nas" (an-Nas has 6), it quoted 7:158 as that
+verse. Asked for "verse 8 of al-Fatiha" (7), it answered with unrelated tafsir. For a fabricated hadith
+("patriotism is part of faith"), it quoted Bukhari 24 ("modesty is part of faith") without saying the
+asked one doesn't exist. Asked for the number of "ikhtilaf ummati rahma" in Muslim, it gave another
+hadith's number. The 4B had 2 such misses.
+
+### A checker gap the 8B found
+
+One 8B answer showed a made-up Arabic "verse" under the broken marker `[al-Baqarah 2:268]`. Quotes were only
+verified against the passage a *valid* marker points to, so this one was never checked. Now a quote with no
+valid marker must appear in one of the sources given, or the answer fails (`unsourced_quote`,
+`tests/test_citations.py`).
+
+### Next
+
+- **A guard for references that don't exist:** the server knows how many ayat each surah has, so "verse 8 of
+  al-Fatiha" or "surah 115" can be answered "that verse doesn't exist" without asking the model. Three of
+  the 8B's four misleading trick answers are this kind.
+- **Quantise** (Q4_K_M, about 5 GB) for speed, then re-benchmark to see what it costs.
+- **Score "wrong" fairly:** the benchmark's source lists are incomplete. An LLM judge or a reviewer pass
+  over the "wrong" answers would show the true picture.
