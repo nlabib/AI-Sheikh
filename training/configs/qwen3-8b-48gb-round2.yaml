@@ -1,0 +1,14 @@
+# Round 2 data on the bigger model, for a 48 GB card (e.g. a rented RTX A6000; training/runpod_train.sh).
+# Same recipe as qwen3-4b-24gb-v2.yaml (2 epochs, learning rate 1e-4, LoRA rank 32), with batch 1 x 16:
+# batching pads every example to the longest in its batch, and these prompts reach 4,096 tokens.
+model: Qwen/Qwen3-8B
+out: outputs/ai-sheikh-8b-v2
+max_len: 4096
+batch_size: 1
+grad_accum: 16
+epochs: 2
+lr: 1.0e-4
+lora_r: 32
+lora_alpha: 64
+gradient_checkpointing: true
+eval_steps: 20

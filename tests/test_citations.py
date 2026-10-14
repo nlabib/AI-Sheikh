@@ -32,6 +32,16 @@ def test_misquote_fails(store):
     assert "misquote" in kinds(report)
 
 
+def test_quote_under_a_broken_marker_must_still_be_in_the_sources(store):
+    # A made-up "verse" behind a malformed marker used to go unchecked, because quotes were only verified
+    # against the passage a valid marker points to.
+    made_up = 'Allah says, "Do not raise your names and do not lighten them" [al-Baqarah 2:268].'
+    report = check_answer(made_up, EVIDENCE, store)
+    assert report.status == "fail" and "unsourced_quote" in kinds(report)
+    real = 'Allah says, "There is no compulsion in religion." [Q 2:256]'
+    assert "unsourced_quote" not in kinds(check_answer(real, EVIDENCE, store))
+
+
 def test_arabic_quote_matches_without_harakat(store):
     answer = 'قال تعالى: "لا إكراه في الدين" [quran:2:256]'
     assert check_answer(answer, EVIDENCE, store).status == "pass"
