@@ -452,6 +452,11 @@ on your 24 GB 3090 use `qwen3-8b-24gb.yaml` instead (slower, shorter prompts). A
 $0.59/hour on Runpod's Secure Cloud, and the run is estimated at 2 to 2.5 hours in all, so roughly $1 to $1.50
 (an estimate: nobody has timed an 8B run on this data yet).
 
+**Disk:** give the pod at least **100 GB** of storage at `/workspace` (the 40 GB used for the 4B run is far too
+small). The base weights (16 GB), the merged copy (16 GB), the f16 GGUF (16 GB), the Q4_K_M file (5 GB), the
+texts and the checkpoints all live there. The script stops at the start if less than 70 GB is free, and deletes
+the merged copy and the f16 file once they are no longer needed.
+
 On the pod, in `/workspace` (official PyTorch template):
 
 ```bash
