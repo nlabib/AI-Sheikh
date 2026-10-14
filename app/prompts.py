@@ -3,6 +3,8 @@ fine-tuned adapter learns exactly the format the server sends at inference time.
 
 from __future__ import annotations
 
+import unicodedata
+
 from app.text import detect_lang, strip_footnotes
 
 SYSTEM_PROMPT = """You answer questions about Islam using ONLY the numbered sources provided.
@@ -72,4 +74,10 @@ def build_messages(question: str, hits: list) -> list[dict]:
     lang = detect_lang(question)
     system = SYSTEM_PROMPT.format(lang_name=LANG_NAMES.get(lang, "English"))
     user = f"Sources:\n\n{format_evidence(hits) or '(no sources found)'}\n\nQuestion: {question}"
+    # Qwen's own tokenizer NFC-normalizes text before splitting it into tokens, so the model was trained on
+    # normalized text. llama.cpp (LM Studio) does not, and the Bangla letters য় and ড় (U+09DF, U+09DC) are
+    # stored precomposed in the corpus: unnormalized, they reach the model as byte sequences it has hardly
+    # seen, and it garbles words containing them when quoting ("শয়তান" came back as "শতান").
+    # Normalizing here gives every backend the same input.
+    user = unicodedata.normalize("NFC", user)
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
