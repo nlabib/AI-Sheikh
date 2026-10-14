@@ -444,6 +444,30 @@ cp outputs/ai-sheikh-v2-Q4_K_M.gguf /mnt/c/Users/labib/.lmstudio/models/local/ai
 Load it in LM Studio as `ai-sheikh-v2` and run the final benchmark from Ubuntu. Leave the old GGUFs on Windows
 where they are.
 
+## Round 2 with Qwen3-8B on a rented GPU
+
+The 4B model passes 71 of the 98 test questions. Qwen3-8B has twice the capacity and is the next step. It trains
+in 4-bit (QLoRA) with `training/configs/qwen3-8b-48gb-v2.yaml`, which assumes a 48 GB card such as an RTX A6000;
+on your 24 GB 3090 use `qwen3-8b-24gb.yaml` instead (slower, shorter prompts). A 48 GB cloud card costs about
+$0.59/hour on Runpod's Secure Cloud, and the run is estimated at 2 to 2.5 hours in all, so roughly $1 to $1.50
+(an estimate: nobody has timed an 8B run on this data yet).
+
+On the pod, in `/workspace` (official PyTorch template):
+
+```bash
+git clone https://github.com/nlabib/AI-Sheikh && cd AI-Sheikh
+setsid bash training/runpod_train_8b.sh > /workspace/train.log 2>&1 < /dev/null &
+tail -f /workspace/train.log | tr '\r' '\n' | grep --line-buffered -E "STEP_DONE|loss|TRAIN_DONE"
+```
+
+The script installs the libraries, downloads and indexes the texts, builds the training data, trains, merges the
+adapter, converts the model to GGUF and quantizes it to Q4_K_M (about 5 GB). Only that file has to come back to
+your PC. It has not been run end to end yet, so watch the first minutes of the log. When it ends with `TRAIN_DONE`,
+download the files and **delete the pod and any storage volume** so billing stops.
+
+A 4-bit Q4_K_M of the 8B model is about 5 GB and fits the 3090 with room to spare. If answers look degraded, a
+Q8_0 version (about 9 GB) keeps more of the model's quality and still fits next to the search models.
+
 ## When things go wrong
 
 | Symptom | Likely cause and fix |

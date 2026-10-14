@@ -1,0 +1,15 @@
+# Round 2 on a rented 48 GB card (RTX A6000): Qwen3-8B, the 582 checked answers in data/sft/generated/ plus the
+# templates (python -m tools.build_sft). Still QLoRA (4-bit base), so 8B fits with room for long prompts.
+# Same gentle learning rate and 2 epochs as the 4B Round 2 config; a bigger model memorises faster, so watch the
+# loss: it should level off well above zero, not hit ~0 in the first epoch.
+model: Qwen/Qwen3-8B
+out: outputs/ai-sheikh-8b-v2
+max_len: 4096
+batch_size: 2
+grad_accum: 8
+epochs: 2
+lr: 1.0e-4
+lora_r: 32
+lora_alpha: 64
+gradient_checkpointing: true
+eval_steps: 10
