@@ -1,12 +1,12 @@
 # Second fine-tune (24 GB card, e.g. RTX 3090): one epoch instead of two, on the v2 data
 # (python -m tools.build_sft --per-kind 120 --topics). The first run's loss was flat by step 30 of 144 and
 # the model had memorised its templates (docs/TRAINING_LOG.md), so this one trains half as long.
-# Batch 2 x accumulation 8 = 16, the setting that kept memory inside 24 GB on Windows.
+# Batch 1 x accumulation 16: the v2 prompts are longer (up to 4,096 tokens) and batch 2 spilled into system RAM.
 model: Qwen/Qwen3-4B
 out: outputs/islamic-qwen-lora-v2
 max_len: 4096
-batch_size: 2
-grad_accum: 8
+batch_size: 1
+grad_accum: 16
 epochs: 1
 lr: 2.0e-4
 lora_r: 32
