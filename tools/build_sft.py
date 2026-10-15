@@ -31,10 +31,11 @@ from pathlib import Path
 
 from app.config import ROOT, get_settings
 from app.prompts import NOT_SURE, build_messages
-from app.refs import HADITH_COLLECTIONS, parse_ref
+from app.refs import HADITH_COLLECTIONS, expand_marker, find_markers, parse_ref
 from app.retrieve import Hit, Retriever
 from app.store import Passage, Store
 from app.surahs import SURAHS
+from tools.grounded_sft import _tafsir_verses, eval_refs
 
 SFT_DIR = ROOT / "data" / "sft"
 GOLD = ROOT / "data" / "eval" / "gold.jsonl"
@@ -200,6 +201,14 @@ def build(store: Store, per_kind: int, seed: int) -> list[dict]:
     return out
 
 
+def cites_any(example: dict, refs: set[str], store: Store | None = None) -> bool:
+    """True when the example's answer (the last message) cites a ref in `refs`, or a tafsir passage on one
+    of those verses (given the store to look the tafsir up in)."""
+    answer = example["messages"][-1]["content"]
+    cited = [r for m in find_markers(answer) for r in expand_marker(m)]
+    return any(r in refs or (store is not None and _tafsir_verses(store, r) & refs) for r in cited)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     # 150 per template kind: the templates are easy to memorise (the first run's loss hit ~0 by step 30), so they
@@ -218,6 +227,12 @@ def main(argv: list[str] | None = None) -> int:
         for path in sorted(folder.glob("*.jsonl")) if folder.exists() else []:
             reviewed += [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     examples = reviewed + examples
+    # Training answers must not cite what the evaluation sets expect (the benchmark grows over time, so older
+    # answers get checked again here, not only when they are written).
+    held_out = eval_refs()
+    kept = [e for e in examples if not cites_any(e, held_out, store)]
+    print(f"dropped {len(examples) - len(kept)} examples that cite a held-out evaluation source")
+    examples = kept
     random.Random(args.seed).shuffle(examples)
 
     n_valid = max(1, int(len(examples) * args.valid_share))
