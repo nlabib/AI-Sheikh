@@ -249,3 +249,53 @@ def find_quran_mentions(query: str) -> list[tuple[int, int]]:
         if context or int(m.group(2)) >= 60:
             out.append((int(m.group(1)), int(m.group(2))))
     return list(dict.fromkeys(out))
+
+
+# Verses named in words: "verse 8 of al-Fatiha", "সূরা ফাতিহার ৮ নম্বর আয়াত", "الآية السابعة من سورة الناس".
+# Asked for verse 7 of an-Nas (it has 6), the 8B fine-tune quoted 7:158 as if it were that verse.
+_VERSE_WORD = r"(?:verses?|ayahs?|ayat|aya|ayath|আয়াত|আয়াত|ايه|اية)"
+# Arabic ordinals for "the seventh verse" (after normalize: ة -> ه, ى -> ي, أ -> ا).
+_AR_ORDINALS = {normalize(w): n for n, w in enumerate(
+    ["الأولى", "الثانية", "الثالثة", "الرابعة", "الخامسة", "السادسة", "السابعة", "الثامنة", "التاسعة", "العاشرة"], 1)}
+
+
+def _surahs_named(q: str) -> list[int]:
+    """Surah numbers a normalized question names: "surah 112", "Surah Al-Ikhlas", "সূরা ফাতিহার", "سورة الناس"."""
+    found = [int(n) for n in re.findall(_SURAH_WORD + r"\s*(?:no\.?|number|#|নং|رقم)?\s*(\d{1,3})\b(?!\s*[:/]\s*\d)", q)]
+    for m in re.finditer(_SURAH_WORD + r"\s+(?=((?:[a-z']+[-\s]?){1,3}))", q):
+        words = re.split(r"\s+", m.group(1).strip())
+        for n in (2, 1, 3):
+            name = _fold_name(" ".join(words[:n]))
+            close = get_close_matches(name, _SURAH_BY_NAME, n=1, cutoff=0.85) if len(name) >= 5 else []
+            num = _SURAH_BY_NAME.get(name) or (_SURAH_BY_NAME[close[0]] if close else None)
+            if num:
+                found.append(num)
+                break
+    # Arabic letters only (U+0621-U+064A), so "الناس؟" doesn't drag its question mark along.
+    for name in re.findall(_SURAH_WORD + r"\s*((?:আল-?\s?)?[ء-يঀ-৿]+)", q):
+        folded = _fold_local(name)
+        for candidate in (folded, re.sub(r"(?:ের|এর|র)$", "", folded)):  # Bangla possessive: "ফাতিহার"
+            if candidate in _SURAH_BY_LOCAL_NAME:
+                found.append(_SURAH_BY_LOCAL_NAME[candidate])
+                break
+    return list(dict.fromkeys(found))
+
+
+def _verse_numbers(q: str) -> list[int]:
+    nums = [int(n) for n in re.findall(_VERSE_WORD + r"\s*(?:no\.?|number|#|নং|নম্বর|رقم)?\s*(\d{1,3})\b", q)]
+    nums += [int(n) for n in re.findall(r"\b(\d{1,3})\s*(?:st|nd|rd|th)?\s*(?:no\.?|নং|নম্বর)?\s*" + _VERSE_WORD, q)]
+    nums += [_AR_ORDINALS[w] for w in re.findall(r"(?:ايه|اية)\s+(ال\S+)", q) if w in _AR_ORDINALS]
+    return list(dict.fromkeys(nums))
+
+
+def find_impossible_named_refs(query: str) -> list[str]:
+    """Quran references written in words that cannot exist: "surah 115" -> "quran:115", "verse 8 of
+    al-Fatiha" -> "quran:1:8". Verse numbers only count when the question names exactly one surah."""
+    q = normalize(query)
+    surahs = _surahs_named(q)
+    out = [f"quran:{s}" for s in surahs if not 1 <= s <= 114]
+    valid = [s for s in surahs if 1 <= s <= 114]
+    if len(valid) == 1:
+        s = valid[0]
+        out += [quran_ref(s, a) for a in _verse_numbers(q) if not 1 <= a <= SURAHS[s][2]]
+    return list(dict.fromkeys(out))

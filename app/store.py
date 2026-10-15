@@ -138,6 +138,13 @@ class Store:
     def ref_exists(self, ref: str) -> bool:
         return self.conn.execute("SELECT 1 FROM passages WHERE ref=? LIMIT 1", (ref,)).fetchone() is not None
 
+    def max_number(self, collection: str) -> int:
+        """Highest hadith number in a collection ("bukhari:7563" -> 7563); 0 if the collection is empty."""
+        row = self.conn.execute(
+            "SELECT MAX(CAST(substr(ref, instr(ref, ':') + 1) AS INTEGER)) FROM passages WHERE collection=?",
+            (collection,)).fetchone()
+        return int(row[0] or 0)
+
     def refs_by_alt_number(self, collection: str, number: str) -> list[str]:
         """Refs whose alternative number is `number` or `number` plus a letter (Muslim 394 -> 394, 394a...)."""
         rows = self.conn.execute(
