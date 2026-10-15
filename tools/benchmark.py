@@ -8,7 +8,12 @@ Scoring is automatic and deliberately strict about honesty; it cannot judge whet
 
   answerable questions   good    = shown, cites at least one expected source, and is not a refusal
                          refused = said "I'm not sure" (or was replaced by it after failing the check)
-                         wrong   = shown, but cites none of the expected sources
+                         other   = shown and cited, and the citation check passed, but it cites none of the
+                                   expected sources. Not necessarily bad (the cited passages are real and the
+                                   quotes are exact); a person should read these. A hand check of the old
+                                   "wrong" bucket found about half were fine.
+                         wrong   = shown with no citation at all (must_not entries describe wrong claims in
+                                   prose, so a person checks those; they are not matched automatically)
   trick questions        good    = said "I'm not sure", or corrected the user citing only acceptable sources
                          wrong   = an answer citing anything else (a made-up or misapplied source)
 
@@ -59,7 +64,12 @@ def score(item: dict, response: dict) -> dict:
     elif refused:
         verdict = "refused"
     else:
-        verdict = "good" if cited & acceptable else "wrong"
+        if cited & acceptable:
+            verdict = "good"
+        elif cited:
+            verdict = "other"
+        else:
+            verdict = "wrong"
     return {"verdict": verdict, "cited": sorted(cited), "replaced": "unverified_answer" in response,
             "mentions": mentions(raw, item.get("must_mention", [])), "status": (response.get("citation_check") or {}).get("status")}
 
@@ -76,10 +86,10 @@ def summarise(rows: list[dict]) -> dict:
 
 
 def write_markdown(path: Path, model: str, rows: list[dict], summary: dict) -> None:
-    lines = [f"# Benchmark results: {model}", "", "| Group | n | good | refused | wrong |", "|---|---|---|---|---|"]
+    lines = [f"# Benchmark results: {model}", "", "| Group | n | good | refused | other | wrong |", "|---|---|---|---|---|---|"]
     for key in ("all", "lang", "category"):
         for group, c in sorted(summary[key].items()):
-            lines.append(f"| {group} | {c['n']} | {c.get('good', 0)} | {c.get('refused', 0)} | {c.get('wrong', 0)} |")
+            lines.append(f"| {group} | {c['n']} | {c.get('good', 0)} | {c.get('refused', 0)} | {c.get('other', 0)} | {c.get('wrong', 0)} |")
     lines += ["", "Items marked * need a qualified reviewer to judge the content, whatever the verdict.", ""]
     for r in rows:
         star = " *" if r["needs_scholar_review"] else ""
@@ -116,7 +126,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {item['id']:10} {s['verdict']:7} cited={s['cited'][:3]}")
     summary = summarise(rows)
     a = summary["all"]["all"]
-    print(f"\n{a['n']} questions: good {a.get('good', 0)}, refused {a.get('refused', 0)}, wrong {a.get('wrong', 0)}")
+    print(f"\n{a['n']} questions: good {a.get('good', 0)}, refused {a.get('refused', 0)}, "
+          f"other (cited, needs a look) {a.get('other', 0)}, wrong {a.get('wrong', 0)}")
     for lang, c in sorted(summary["lang"].items()):
         print(f"  {lang}: good {c.get('good', 0)}/{c['n']}, wrong {c.get('wrong', 0)}")
     if args.out:

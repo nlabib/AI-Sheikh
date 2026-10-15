@@ -58,7 +58,7 @@ def test_benchmark_scoring_and_files():
     off = {"answer": "Something [quran:1:1].", "citation_check": {"cited": ["quran:1:1"], "status": "pass"}}
     unsure = {"answer": "I'm not sure.", "citation_check": {"cited": [], "status": "pass"}}
     assert score(answerable, ok)["verdict"] == "good"
-    assert score(answerable, off)["verdict"] == "wrong"
+    assert score(answerable, off)["verdict"] == "other"
     assert score(answerable, unsure)["verdict"] == "refused"
     trick = {"expected": "not_sure", "sources": [], "acceptable_sources": ["quran:2:256"], "must_mention": []}
     assert score(trick, unsure)["verdict"] == "good" and score(trick, ok)["verdict"] == "good"
