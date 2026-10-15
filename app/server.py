@@ -15,10 +15,11 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.citations import check_answer
+from app.refs import parse_ref
 from app.config import get_settings
 from app.embed import VectorIndex, make_embedder
 from app.llm import ChatClient, LLMError
-from app.prompts import INTRO, NO_SOURCES, NOT_SURE, SALAM_REPLY, build_messages
+from app.prompts import INTRO, NO_SOURCES, NO_SUCH_REF, NOT_SURE, SALAM_REPLY, build_messages
 from app.rerank import make_reranker
 from app.retrieve import Retriever
 from app.store import Store
@@ -134,6 +135,11 @@ def answer_question(retriever: Retriever, llm, question: str, k: int, collection
     if intro:
         return {"question": question, "sources": [], "answer": intro,
                 "citation_check": {"status": "pass", "cited": [], "issues": []}}
+    missing = retriever.missing_refs(question)
+    if missing:
+        label = ", ".join(parse_ref(r).label for r in missing)
+        return {"question": question, "sources": [], "answer": NO_SUCH_REF[lang].format(ref=label),
+                "citation_check": {"status": "pass", "cited": [], "issues": []}, "missing_refs": missing}
     mode = mode if (mode != "vector" or retriever.index is not None) else "fts"
     # The reranker fills k from a larger pool itself; the E5 floor needs spare candidates to fill from too.
     e5_floor = min_relevance > 0 and retriever.reranker is None

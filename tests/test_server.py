@@ -143,3 +143,19 @@ def test_e5_floor_fills_k_from_later_candidates(store):
     llm = FakeLLM('"There is no compulsion in religion." [quran:2:256]')
     body = answer_question(FloorRetriever(store), llm, "Is there compulsion in religion?", k=2, min_relevance=0.5)
     assert [s["ref"] for s in body["sources"]] == ["quran:2:256", "quran:1:1"]
+
+
+def test_nonexistent_reference_is_refused_without_asking_the_model(store):
+    llm = FakeLLM("It says something [quran:2:256].")
+    with client_with(store, llm) as c:
+        body = c.post("/ask", json={"question": "What does Quran 2:999 say?"}).json()
+    assert llm.seen is None  # the model was never called
+    assert body["missing_refs"] == ["quran:2:999"]
+    assert "2:999" in body["answer"] and "won't guess" in body["answer"]
+
+
+def test_existing_reference_is_not_refused(store):
+    llm = FakeLLM('"There is no compulsion in religion." [quran:2:256]')
+    with client_with(store, llm) as c:
+        body = c.post("/ask", json={"question": "What does 2:256 say?"}).json()
+    assert "missing_refs" not in body and llm.seen is not None

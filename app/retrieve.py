@@ -188,6 +188,19 @@ class Retriever:
                 out.append(ref)
         return list(dict.fromkeys(out))
 
+    def missing_refs(self, query: str) -> list[str]:
+        """Quran verses and hadith the user typed that aren't in the corpus ("quran:2:999", "bukhari:99999").
+        A model asked about a reference that doesn't exist tends to answer anyway, so the server refuses first."""
+        found = self.explicit_refs(query)
+        out = []
+        for ref in find_explicit_refs(query):
+            if ref in found or ref.partition(":")[0] in TAFSIR_COLLECTIONS:
+                continue
+            if ref.startswith("muslim:") and self.store.refs_by_alt_number("muslim", ref.partition(":")[2]):
+                continue
+            out.append(ref)
+        return out
+
     def relevance(self, query: str, refs: list[str]) -> dict[str, float]:
         """How close each ref is in meaning to the query: the best E5 cosine over its editions.
         Empty without a vector index."""
