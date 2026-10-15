@@ -159,3 +159,17 @@ def test_existing_reference_is_not_refused(store):
     with client_with(store, llm) as c:
         body = c.post("/ask", json={"question": "What does 2:256 say?"}).json()
     assert "missing_refs" not in body and llm.seen is not None
+
+
+def test_out_of_range_chapter_is_refused(store):
+    with client_with(store, FakeLLM("x")) as c:
+        body = c.post("/ask", json={"question": "What is the text of Quran 115:1?"}).json()
+    assert body["missing_refs"] == ["quran:115:1"]
+
+
+def test_clock_times_are_not_verse_references(store):
+    llm = FakeLLM('"There is no compulsion in religion." [quran:2:256]')
+    with client_with(store, llm) as c:
+        for q in ("Can I pray at 1:30 pm?", "Is there compulsion in religion? Asking at 10:45"):
+            body = c.post("/ask", json={"question": q}).json()
+            assert "missing_refs" not in body, q
