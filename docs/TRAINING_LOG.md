@@ -405,3 +405,20 @@ valid marker must appear in one of the sources given, or the answer fails (`unso
 - **Quantise** (Q4_K_M, about 5 GB) for speed, then re-benchmark to see what it costs.
 - **Score "wrong" fairly:** the benchmark's source lists are incomplete. An LLM judge or a reviewer pass
   over the "wrong" answers would show the true picture.
+
+### Guard for references that don't exist (added after the 8B run)
+
+`app/refs.find_impossible_refs` spots Quran references that cannot exist: a surah above 114, an ayah past the
+end of its surah, given as `2:300`, "verse 8 of Surah al-Fatiha", "সূরা ফাতিহার ৮ নম্বর আয়াত" or "الآية
+السابعة من سورة الناس" (Arabic ordinals included). A bare `5:30` only counts when the question is about the
+Quran, so times of day are left alone. `/ask` also checks hadith numbers past the end of a collection
+(`Store.max_number`). When a question names such a reference and no valid one, the server answers in the
+question's language without retrieval or the model, e.g. "I'm not sure what you are referring to: Surah
+Al-Faatiha (1) has 7 ayat, so there is no ayah 8. Please check the reference." Tests:
+`tests/test_impossible_refs.py`.
+
+Over the 300 benchmark questions the guard answers 6, all trick questions, and none of the 250 others.
+Trick questions on the 8B: **46/50** with the guard (42–45 without; the 4B gets 48). The four left have no
+number to check: a hadith presented as a verse (trk-007, answered with 5:69, whose text it quotes
+correctly), a false premise ("why does the Quran say Friday prayer is optional"), and two fabricated
+sayings answered with a real, different hadith. Those need training examples, not rules.

@@ -81,3 +81,24 @@ def build_messages(question: str, hits: list) -> list[dict]:
     # Normalizing here gives every backend the same input.
     user = unicodedata.normalize("NFC", user)
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+# A question about a reference that cannot exist (verse 8 of al-Fatiha, surah 115, a hadith number past the end
+# of the collection) is answered with these, without asking the model. Hadith numbering differs between
+# editions, so those messages say which numbering they mean.
+NO_SUCH_REF = {
+    "en": {"start": "I'm not sure what you are referring to: ",
+           "ayah": "Surah {name} ({s}) has {n} ayat, so there is no ayah {a}.",
+           "surah": "the Quran has 114 surahs, so there is no surah {s}.",
+           "hadith": "{title} in the edition I search has no hadith numbered {num} (its numbers run to {max}).",
+           "end": " Please check the reference."},
+    "bn": {"start": "আমি নিশ্চিত নই আপনি কোনটির কথা বলছেন: ",
+           "ayah": "সূরা {name} ({s})-এ {n}টি আয়াত আছে, তাই {a} নম্বর আয়াত নেই।",
+           "surah": "কুরআনে ১১৪টি সূরা আছে, তাই {s} নম্বর সূরা নেই।",
+           "hadith": "আমি যে সংস্করণে খুঁজি তাতে {title}-এর {num} নম্বর হাদিস নেই (সেখানে {max} পর্যন্ত আছে)।",
+           "end": " অনুগ্রহ করে রেফারেন্সটি যাচাই করুন।"},
+    "ar": {"start": "لست متأكدًا مما تقصده: ",
+           "ayah": "سورة {name} ({s}) عدد آياتها {n}، فلا توجد آية رقم {a}.",
+           "surah": "في القرآن 114 سورة، فلا توجد سورة رقم {s}.",
+           "hadith": "لا يوجد في الطبعة التي أبحث فيها حديث برقم {num} في {title} (تصل أرقامه إلى {max}).",
+           "end": " يرجى التحقق من المرجع."},
+}

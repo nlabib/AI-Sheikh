@@ -18,10 +18,12 @@ from app.citations import check_answer
 from app.config import get_settings
 from app.embed import VectorIndex, make_embedder
 from app.llm import ChatClient, LLMError
-from app.prompts import INTRO, NO_SOURCES, NOT_SURE, SALAM_REPLY, build_messages
+from app.prompts import INTRO, NO_SOURCES, NO_SUCH_REF, NOT_SURE, SALAM_REPLY, build_messages
+from app.refs import HADITH_COLLECTIONS, find_explicit_refs, find_impossible_refs
 from app.rerank import make_reranker
 from app.retrieve import Retriever
 from app.store import Store
+from app.surahs import SURAHS
 from app.text import detect_lang
 
 
@@ -121,6 +123,36 @@ def tidy(answer: str, lang: str) -> str:
     return answer.replace("।", ".") if lang != "bn" else answer
 
 
+_BN_DIGITS = str.maketrans("0123456789", "০১২৩৪৫৬৭৮৯")
+
+
+def impossible_reference_reply(retriever: Retriever, question: str) -> str | None:
+    """A fixed answer when the question asks for a reference that cannot exist (surah 115, verse 8 of al-Fatiha,
+    a hadith number past the end of the collection) and names no valid one. Models answer these from whatever
+    they were given: asked for verse 7 of an-Nas, the 8B fine-tune quoted 7:158 as if it were that verse."""
+    if retriever.explicit_refs(question):
+        return None
+    lang = detect_lang(question)
+    text = NO_SUCH_REF.get(lang, NO_SUCH_REF["en"])
+    facts = []
+    for ref in find_impossible_refs(question):
+        if ref.kind == "surah":
+            facts.append(text["surah"].format(s=ref.surah))
+        else:
+            name, _meaning, n = SURAHS[ref.surah]
+            facts.append(text["ayah"].format(name=name, s=ref.surah, n=n, a=ref.ayah))
+    for ref in find_explicit_refs(question):
+        collection, _, number = ref.partition(":")
+        if collection in HADITH_COLLECTIONS and number.isdigit():
+            top = retriever.store.max_number(collection)
+            if top and int(number) > top:
+                facts.append(text["hadith"].format(title=HADITH_COLLECTIONS[collection], num=number, max=top))
+    if not facts:
+        return None
+    reply = text["start"] + " ".join(dict.fromkeys(facts)) + text["end"]
+    return reply.translate(_BN_DIGITS) if lang == "bn" else reply
+
+
 def answer_question(retriever: Retriever, llm, question: str, k: int, collections: list[str] | None = None,
                     mode: str = "hybrid", strict: bool = True, min_relevance: float = 0.0) -> dict:
     """The whole /ask pipeline: retrieve, drop passages that aren't about the question, ask the model,
@@ -133,6 +165,10 @@ def answer_question(retriever: Retriever, llm, question: str, k: int, collection
     intro = small_talk_reply(question)
     if intro:
         return {"question": question, "sources": [], "answer": intro,
+                "citation_check": {"status": "pass", "cited": [], "issues": []}}
+    no_such = impossible_reference_reply(retriever, question)
+    if no_such:
+        return {"question": question, "sources": [], "answer": no_such,
                 "citation_check": {"status": "pass", "cited": [], "issues": []}}
     mode = mode if (mode != "vector" or retriever.index is not None) else "fts"
     # The reranker fills k from a larger pool itself; the E5 floor needs spare candidates to fill from too.

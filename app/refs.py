@@ -229,3 +229,74 @@ def find_explicit_refs(query: str) -> list[str]:
             for num, letter in re.findall(re.escape(normalize(name)) + _FILLER + r"\s*(\d{1,5})([a-z]?)\b", q):
                 found.append(f"{key}:{int(num)}{letter}" if letter and key == "muslim" else hadith_ref(key, int(num)))
     return list(dict.fromkeys(found))
+
+
+# --- References that cannot exist -----------------------------------------------------------------------------
+# A fine-tuned model asked for "verse 7 of Surah an-Nas" (it has 6) quoted 7:158 as if it were that verse. The
+# corpus knows how many ayat each surah has, so such questions are answered without asking the model.
+
+_VERSE_WORD = r"(?:verses?|ayahs?|ayat|aya|ayath|আয়াত|আয়াত|ايه|اية)"
+_QURAN_CONTEXT = re.compile(r"quran|qur'an|koran|surah|sura|verse|ayah|ayat|কুরআন|কোরআন|সূরা|সুরা|আয়াত|আয়াত|"
+                            r"قران|سوره|ايه|اية")
+# Arabic ordinals for "the seventh verse" (after normalize: ة -> ه, ى -> ي, أ -> ا).
+_AR_ORDINALS = {normalize(w): n for n, w in enumerate(
+    ["الأولى", "الثانية", "الثالثة", "الرابعة", "الخامسة", "السادسة", "السابعة", "الثامنة", "التاسعة", "العاشرة"], 1)}
+
+
+def _surahs_named(q: str) -> list[int]:
+    """Surah numbers a normalized question names: "surah 112", "Surah Al-Ikhlas", "সূরা ফাতিহার", "سورة الناس"."""
+    found: list[int] = []
+    found += [int(n) for n in re.findall(_SURAH_WORD + r"\s*(?:no\.?|number|#|নং|رقم)?\s*(\d{1,3})\b(?!\s*[:/]\s*\d)", q)]
+    for m in re.finditer(_SURAH_WORD + r"\s+(?=((?:[a-z']+[-\s]?){1,3}))", q):
+        words = re.split(r"\s+", m.group(1).strip())
+        for n in (2, 1, 3):
+            name = _fold_name(" ".join(words[:n]))
+            close = get_close_matches(name, _SURAH_BY_NAME, n=1, cutoff=0.85) if len(name) >= 5 else []
+            num = _SURAH_BY_NAME.get(name) or (_SURAH_BY_NAME[close[0]] if close else None)
+            if num:
+                found.append(num)
+                break
+    # Arabic letters only (U+0621-U+064A), so "الناس؟" doesn't drag its question mark along.
+    for name in re.findall(_SURAH_WORD + r"\s*((?:আল-?\s?)?[\u0621-\u064A\u0980-\u09FF]+)", q):
+        folded = _fold_local(name)
+        # Bangla possessive: "ফাতিহার", "নাসের"
+        for candidate in (folded, re.sub(r"(?:ের|এর|র)$", "", folded)):
+            if candidate in _SURAH_BY_LOCAL_NAME:
+                found.append(_SURAH_BY_LOCAL_NAME[candidate])
+                break
+    return list(dict.fromkeys(found))
+
+
+def _verse_numbers(q: str) -> list[int]:
+    nums = [int(n) for n in re.findall(_VERSE_WORD + r"\s*(?:no\.?|number|#|নং|নম্বর|رقم)?\s*(\d{1,3})\b", q)]
+    nums += [int(n) for n in re.findall(r"\b(\d{1,3})\s*(?:st|nd|rd|th)?\s*(?:no\.?|নং|নম্বর)?\s*" + _VERSE_WORD, q)]
+    nums += [_AR_ORDINALS[w] for w in re.findall(r"(?:ايه|اية)\s+(ال\S+)", q) if w in _AR_ORDINALS]
+    return list(dict.fromkeys(nums))
+
+
+@dataclass(frozen=True)
+class MissingRef:
+    kind: str  # "surah" (number > 114) or "ayah" (past the end of its surah)
+    surah: int
+    ayah: int = 0
+
+
+def find_impossible_refs(query: str) -> list[MissingRef]:
+    """Quran references in a question that cannot exist: surah 115, 2:300, "verse 8 of al-Fatiha". A bare
+    "5:30" only counts when the question is about the Quran, so times of day are left alone."""
+    q = normalize(query)
+    about_quran = bool(_QURAN_CONTEXT.search(q))
+    out: list[MissingRef] = []
+    for s in _surahs_named(q):
+        if not 1 <= s <= 114:
+            out.append(MissingRef("surah", s))
+    pairs = [(int(s), int(a)) for s, a in re.findall(r"\b(\d{1,3})\s*[:/]\s*(\d{1,3})\b", q)] if about_quran else []
+    surahs = [s for s in _surahs_named(q) if 1 <= s <= 114]
+    if len(surahs) == 1:
+        pairs += [(surahs[0], n) for n in _verse_numbers(q)]
+    for s, a in pairs:
+        if not 1 <= s <= 114:
+            out.append(MissingRef("surah", s))
+        elif not 1 <= a <= SURAHS[s][2]:
+            out.append(MissingRef("ayah", s, a))
+    return list(dict.fromkeys(out))
