@@ -405,3 +405,28 @@ valid marker must appear in one of the sources given, or the answer fails (`unso
 - **Quantise** (Q4_K_M, about 5 GB) for speed, then re-benchmark to see what it costs.
 - **Score "wrong" fairly:** the benchmark's source lists are incomplete. An LLM judge or a reviewer pass
   over the "wrong" answers would show the true picture.
+
+## 4-bit 8B (Q4_K_M), 2026-10-15
+
+No retraining. I took the round-2 adapter, merged it into Qwen3-8B on a rented RunPod RTX A6000 (Secure
+Cloud, $0.59/hr), made the chat template non-thinking, converted to f16 GGUF and quantized to Q4_K_M with
+llama.cpp's `llama-quantize` (`training/runpod_quantize.sh`). That took 11 minutes on the pod; the whole pod
+lived about 22 minutes (roughly $0.22). Its self-delete timer was 90 minutes, so a lost connection could
+not cost more than $1. The file was checked by sha256 after download, then the pod and its storage were
+deleted.
+
+| | Q8_0 | Q4_K_M |
+|---|---|---|
+| File | 8.7 GB | 5.0 GB (4.9 bits per weight) |
+| LM Studio memory | ~8.7 GB | 4.7 GB |
+| Benchmark: good / refused / wrong | 130 / 51 / 119 | 127 / 48 / 125 |
+| Trick questions good (of 50) | 42 | 44 |
+| Time for the 300 questions | ~27 min | 28 min |
+
+Same code (the checker fix, without the reference guard) and settings as the Q8 run, so only the weights
+differ. 238 of 300 questions got the same verdict. The losses are small and spread out (fiqh rulings 8 -> 6
+good, seerah 3 -> 1, Quran content 12 -> 10), and Quran-locate and trick questions went slightly up. Going
+from 8-bit to 4-bit costs about 1% good answers and adds about 2% wrong answers, for 40% less memory.
+
+**Use:** Q4_K_M when memory is tight or another model must stay loaded beside it; Q8_0 otherwise. In LM
+Studio both sit under one entry: `ai-sheikh/ai-sheikh-8b-v2` is the Q4 file and `ai-sheikh-8b-v2@q8_0` the Q8.
