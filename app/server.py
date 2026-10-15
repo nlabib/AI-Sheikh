@@ -15,14 +15,15 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.citations import check_answer
-from app.refs import parse_ref
+from app.refs import HADITH_COLLECTIONS, parse_ref
 from app.config import get_settings
 from app.embed import VectorIndex, make_embedder
 from app.llm import ChatClient, LLMError
-from app.prompts import INTRO, NO_SOURCES, NO_SUCH_REF, NOT_SURE, SALAM_REPLY, build_messages
+from app.prompts import INTRO, NO_SOURCES, NO_SUCH_REF, NO_SUCH_REF_WHY, NOT_SURE, SALAM_REPLY, build_messages
 from app.rerank import make_reranker
 from app.retrieve import Retriever
 from app.store import Store
+from app.surahs import SURAHS
 from app.text import detect_lang
 
 
@@ -122,6 +123,30 @@ def tidy(answer: str, lang: str) -> str:
     return answer.replace("।", ".") if lang != "bn" else answer
 
 
+_BN_DIGITS = str.maketrans("0123456789", "০১২৩৪৫৬৭৮৯")
+
+
+def why_missing(store: Store, missing: list[str], lang: str) -> str:
+    """Why the references can't exist, when we know: "Surah Al-Fatiha (1) has 7 ayat." or where the
+    collection's numbering ends. Empty when we don't (2:200 exists; a corpus gap is not a reason)."""
+    text, facts = NO_SUCH_REF_WHY[lang], []
+    for ref in missing:
+        collection, _, number = ref.partition(":")
+        if collection == "quran":
+            s, _, a = number.partition(":")
+            if not 1 <= int(s) <= 114:
+                facts.append(text["surahs"])
+            elif a and int(a) > SURAHS[int(s)][2]:
+                name, _meaning, n = SURAHS[int(s)]
+                facts.append(text["ayah"].format(name=name, s=s, n=n))
+        elif collection in HADITH_COLLECTIONS and number.isdigit():
+            top = store.max_number(collection)
+            if top and int(number) > top:
+                facts.append(text["hadith"].format(title=HADITH_COLLECTIONS[collection], max=top))
+    why = "".join(f + " " for f in dict.fromkeys(facts))
+    return why.translate(_BN_DIGITS) if lang == "bn" else why
+
+
 def answer_question(retriever: Retriever, llm, question: str, k: int, collections: list[str] | None = None,
                     mode: str = "hybrid", strict: bool = True, min_relevance: float = 0.0) -> dict:
     """The whole /ask pipeline: retrieve, drop passages that aren't about the question, ask the model,
@@ -138,7 +163,8 @@ def answer_question(retriever: Retriever, llm, question: str, k: int, collection
     missing = retriever.missing_refs(question)
     if missing:
         label = ", ".join(parse_ref(r).label for r in missing)
-        return {"question": question, "sources": [], "answer": NO_SUCH_REF[lang].format(ref=label),
+        answer = NO_SUCH_REF[lang].format(ref=label, why=why_missing(retriever.store, missing, lang))
+        return {"question": question, "sources": [], "answer": answer,
                 "citation_check": {"status": "pass", "cited": [], "issues": []}, "missing_refs": missing}
     mode = mode if (mode != "vector" or retriever.index is not None) else "fts"
     # The reranker fills k from a larger pool itself; the E5 floor needs spare candidates to fill from too.

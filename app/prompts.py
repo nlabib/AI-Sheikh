@@ -38,13 +38,28 @@ NO_SOURCES = {
     "ar": "لم أجد شيئًا عن هذا في القرآن أو في كتب الحديث الستة التي أبحث فيها، وأنا لا أجيب إلا منها، فلن أخمّن.",
 }
 
-# When the user names a verse or hadith number that isn't in the corpus. {ref} is the label of the reference.
+# When the user names a verse or hadith number that isn't in the corpus. {ref} is the label of the reference;
+# {why} is empty or sentences from NO_SUCH_REF_WHY ending in a space.
 NO_SUCH_REF = {
     "en": "I couldn't find {ref} in my sources, so I can't tell you what it says and I won't guess. "
-          "Please check the number, or ask a qualified scholar.",
+          "{why}Please check the number, or ask a qualified scholar.",
     "bn": "আমার উৎসগুলোতে {ref} খুঁজে পাইনি, তাই এতে কী আছে বলতে পারছি না এবং অনুমানও করব না। "
-          "অনুগ্রহ করে নম্বরটি যাচাই করুন, অথবা একজন যোগ্য আলেমকে জিজ্ঞাসা করুন।",
-    "ar": "لم أجد {ref} في مصادري، فلا أستطيع أن أخبرك بما فيه ولن أخمّن. يرجى التأكد من الرقم أو سؤال عالم مختص.",
+          "{why}অনুগ্রহ করে নম্বরটি যাচাই করুন, অথবা একজন যোগ্য আলেমকে জিজ্ঞাসা করুন।",
+    "ar": "لم أجد {ref} في مصادري، فلا أستطيع أن أخبرك بما فيه ولن أخمّن. {why}يرجى التأكد من الرقم أو سؤال عالم مختص.",
+}
+
+# Why a reference can't exist, when we know: the surah is shorter, or the collection's numbering ends earlier.
+# Hadith numbering differs between editions, so that sentence says which numbering it means.
+NO_SUCH_REF_WHY = {
+    "en": {"surahs": "The Quran has 114 surahs.",
+           "ayah": "Surah {name} ({s}) has {n} ayat.",
+           "hadith": "{title} in the edition I search is numbered up to {max}."},
+    "bn": {"surahs": "কুরআনে ১১৪টি সূরা আছে।",
+           "ayah": "সূরা {name} ({s})-এ {n}টি আয়াত আছে।",
+           "hadith": "আমি যে সংস্করণে খুঁজি তাতে {title}-এর হাদিস {max} নম্বর পর্যন্ত।"},
+    "ar": {"surahs": "في القرآن 114 سورة.",
+           "ayah": "سورة {name} ({s}) عدد آياتها {n}.",
+           "hadith": "أرقام {title} في الطبعة التي أبحث فيها تصل إلى {max}."},
 }
 
 INTRO = {

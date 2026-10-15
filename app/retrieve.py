@@ -13,7 +13,8 @@ import numpy as np
 
 from app.embed import Embedder, VectorIndex
 from app.rerank import Reranker
-from app.refs import HADITH_COLLECTIONS, TAFSIR_COLLECTIONS, TAFSIR_LANGS, find_explicit_refs, find_quran_mentions, parse_ref, quran_ref
+from app.refs import (HADITH_COLLECTIONS, TAFSIR_COLLECTIONS, TAFSIR_LANGS, find_explicit_refs,
+                      find_impossible_named_refs, find_quran_mentions, parse_ref, quran_ref)
 from app.store import Passage, Store
 from app.text import detect_lang, strip_footnotes
 
@@ -190,10 +191,11 @@ class Retriever:
 
     def missing_refs(self, query: str) -> list[str]:
         """Quran verses and hadith the user typed that aren't in the corpus ("quran:2:999", "quran:115:1",
-        "bukhari:99999"). A model asked about a reference that doesn't exist tends to answer anyway, so the
+        "bukhari:99999", or "quran:1:8" for "verse 8 of al-Fatiha"). A model asked about a reference that doesn't exist tends to answer anyway, so the
         server refuses first."""
         out = [quran_ref(s, a) for s, a in find_quran_mentions(query)
                if not (1 <= s <= 114 and self.store.ref_exists(quran_ref(s, a)))]
+        out += find_impossible_named_refs(query)
         found = set(self.explicit_refs(query))
         for ref in find_explicit_refs(query):
             collection = ref.partition(":")[0]
