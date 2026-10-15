@@ -35,7 +35,7 @@ from app.refs import HADITH_COLLECTIONS, expand_marker, find_markers, parse_ref
 from app.retrieve import Hit, Retriever
 from app.store import Passage, Store
 from app.surahs import SURAHS
-from tools.grounded_sft import eval_refs
+from tools.grounded_sft import _tafsir_verses, eval_refs
 
 SFT_DIR = ROOT / "data" / "sft"
 GOLD = ROOT / "data" / "eval" / "gold.jsonl"
@@ -201,10 +201,12 @@ def build(store: Store, per_kind: int, seed: int) -> list[dict]:
     return out
 
 
-def cites_any(example: dict, refs: set[str]) -> bool:
-    """True when the example's answer (the last message) cites a ref in `refs`."""
+def cites_any(example: dict, refs: set[str], store: Store | None = None) -> bool:
+    """True when the example's answer (the last message) cites a ref in `refs`, or a tafsir passage on one
+    of those verses (given the store to look the tafsir up in)."""
     answer = example["messages"][-1]["content"]
-    return any(r in refs for m in find_markers(answer) for r in expand_marker(m))
+    cited = [r for m in find_markers(answer) for r in expand_marker(m)]
+    return any(r in refs or (store is not None and _tafsir_verses(store, r) & refs) for r in cited)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -228,7 +230,7 @@ def main(argv: list[str] | None = None) -> int:
     # Training answers must not cite what the evaluation sets expect (the benchmark grows over time, so older
     # answers get checked again here, not only when they are written).
     held_out = eval_refs()
-    kept = [e for e in examples if not cites_any(e, held_out)]
+    kept = [e for e in examples if not cites_any(e, held_out, store)]
     print(f"dropped {len(examples) - len(kept)} examples that cite a held-out evaluation source")
     examples = kept
     random.Random(args.seed).shuffle(examples)

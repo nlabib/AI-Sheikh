@@ -56,3 +56,17 @@ def test_examples_citing_held_out_sources_are_detected():
     assert cites_any(ex, {"bukhari:1"})
     assert not cites_any(ex, {"bukhari:2"})
     assert cites_any({"messages": [{"role": "assistant", "content": "x [quran:2:255-256]"}]}, {"quran:2:256"})
+
+
+def test_tafsir_on_a_held_out_verse_counts_as_citing_it():
+    from types import SimpleNamespace
+    from tools.build_sft import cites_any
+
+    class FakeStore:
+        def by_ref(self, ref):
+            return [SimpleNamespace(meta={"surah": 2, "ayah": 255, "ayah_to": 256})]
+
+    ex = {"messages": [{"role": "assistant", "content": "See [jalalayn:2:255]."}]}
+    assert cites_any(ex, {"quran:2:256"}, FakeStore())
+    assert not cites_any(ex, {"quran:2:257"}, FakeStore())
+    assert not cites_any(ex, {"quran:2:256"})  # without a store only the cited refs themselves are compared
