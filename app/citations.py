@@ -61,7 +61,7 @@ class CitationReport:
 
 
 FAIL_KINDS = {"nonexistent_reference", "uncited_evidence", "misquote", "unsupported_answer", "no_citations",
-              "misattributed", "mixed_language", "repetition", "off_topic_answer"}
+              "misattributed", "mixed_language", "repetition", "off_topic_answer", "unsourced_quote"}
 
 
 _NOT_SURE = re.compile(r"(i'?m not sure|i am not sure|আমি নিশ্চিত নই|لست متأكد|"
@@ -196,6 +196,7 @@ def check_answer(answer: str, evidence_refs: list[str], store: Store, min_overla
             issues.append(Issue("malformed_marker", f"[{bad}] is not a valid citation marker"))
 
     seen_sentences: dict[str, int] = {}
+    evidence_texts: list[str] | None = None  # loaded on first use
     for sentence in _sentences(answer):
         refs = [r for m in find_markers(sentence) for r in expand_marker(m)]
         texts = [_support_text(p) for r in refs for p in store.by_ref(r)]
@@ -204,7 +205,17 @@ def check_answer(answer: str, evidence_refs: list[str], store: Store, min_overla
         if len(key.split()) >= 4:
             seen_sentences[key] = seen_sentences.get(key, 0) + 1
         if not refs:
+            # A refusal that repeats the false premise ("the sources do not contain \"X\"") isn't quoting a source.
             explains_refusal = refusal and _TALKS_ABOUT_SOURCES.search(plain) and _NEGATION.search(plain)
+            # A quote with no valid marker can't be checked against its source, so check it against all of
+            # them: the 8B model once quoted a made-up "verse" under a broken marker ([al-Baqarah 2:268]).
+            for quote in ([] if explains_refusal else _QUOTE.findall(sentence)):
+                if len(quote.strip()) < MIN_QUOTE_CHARS:
+                    continue
+                if evidence_texts is None:
+                    evidence_texts = [_support_text(p) for r in evidence for p in store.by_ref(r)]
+                if not _quote_found(quote, evidence_texts):
+                    issues.append(Issue("unsourced_quote", "quoted text is in none of the sources", sentence))
             if (len(tokenize(plain, drop_stopwords=True)) >= 6 and not _EXEMPT.search(plain)
                     and not explains_refusal):
                 issues.append(Issue("uncited_claim", "substantive sentence without a citation", sentence))
