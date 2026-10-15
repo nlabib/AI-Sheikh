@@ -205,16 +205,17 @@ def check_answer(answer: str, evidence_refs: list[str], store: Store, min_overla
         if len(key.split()) >= 4:
             seen_sentences[key] = seen_sentences.get(key, 0) + 1
         if not refs:
+            # A refusal that repeats the false premise ("the sources do not contain \"X\"") isn't quoting a source.
+            explains_refusal = refusal and _TALKS_ABOUT_SOURCES.search(plain) and _NEGATION.search(plain)
             # A quote with no valid marker can't be checked against its source, so check it against all of
             # them: the 8B model once quoted a made-up "verse" under a broken marker ([al-Baqarah 2:268]).
-            for quote in _QUOTE.findall(sentence):
+            for quote in ([] if explains_refusal else _QUOTE.findall(sentence)):
                 if len(quote.strip()) < MIN_QUOTE_CHARS:
                     continue
                 if evidence_texts is None:
                     evidence_texts = [_support_text(p) for r in evidence for p in store.by_ref(r)]
                 if not _quote_found(quote, evidence_texts):
                     issues.append(Issue("unsourced_quote", "quoted text is in none of the sources", sentence))
-            explains_refusal = refusal and _TALKS_ABOUT_SOURCES.search(plain) and _NEGATION.search(plain)
             if (len(tokenize(plain, drop_stopwords=True)) >= 6 and not _EXEMPT.search(plain)
                     and not explains_refusal):
                 issues.append(Issue("uncited_claim", "substantive sentence without a citation", sentence))

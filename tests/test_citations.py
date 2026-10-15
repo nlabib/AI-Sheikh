@@ -159,3 +159,8 @@ def test_sentence_citing_tafsir_may_mention_the_quran(store):
     from app.citations import _misattributed
     assert _misattributed("Ibn Kathir says the Quran here means mercy [ibnkathiren:2:1].", ["ibnkathiren:2:1"]) is None
     assert _misattributed("The Quran says so [bukhari:1].", ["bukhari:1"]) is not None
+
+
+def test_refusal_may_repeat_the_false_premise_in_quotes(store):
+    answer = "I'm not sure. The sources do not contain the saying \"patriotism is part of faith.\""
+    assert "unsourced_quote" not in kinds(check_answer(answer, EVIDENCE, store))
