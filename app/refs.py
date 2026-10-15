@@ -229,3 +229,23 @@ def find_explicit_refs(query: str) -> list[str]:
             for num, letter in re.findall(re.escape(normalize(name)) + _FILLER + r"\s*(\d{1,5})([a-z]?)\b", q):
                 found.append(f"{key}:{int(num)}{letter}" if letter and key == "muslim" else hadith_ref(key, int(num)))
     return list(dict.fromkeys(found))
+
+
+_QURAN_WORDS = re.compile(r"quran|qur'an|koran|surah|sura\b|verse|ayah|ayat|aya\b|কুরআন|কোরআন|সূরা|সুরা|আয়াত|القرآن|قرآن|سورة|الآية|آية")
+_CLOCK_SUFFIX = re.compile(r"\s*(?:am|pm|a\.m|p\.m|o'?clock)\b")
+
+
+def find_quran_mentions(query: str) -> list[tuple[int, int]]:
+    """Every "S:A" the user typed as a Quran reference, valid or not ("115:1", "2:999"). Unlike
+    find_explicit_refs it keeps out-of-range numbers, so a made-up verse can be told apart from a real one.
+    A pair only counts when the question talks about the Quran, or the second number can't be a minute
+    (60 or more), and never when it is followed by am/pm ("pray at 1:30 pm")."""
+    q = normalize(query)
+    context = bool(_QURAN_WORDS.search(q))
+    out = []
+    for m in re.finditer(r"\b(\d{1,3})\s*[:/]\s*(\d{1,3})\b", q):
+        if _CLOCK_SUFFIX.match(q, m.end()):
+            continue
+        if context or int(m.group(2)) >= 60:
+            out.append((int(m.group(1)), int(m.group(2))))
+    return list(dict.fromkeys(out))

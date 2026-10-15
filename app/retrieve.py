@@ -13,7 +13,7 @@ import numpy as np
 
 from app.embed import Embedder, VectorIndex
 from app.rerank import Reranker
-from app.refs import HADITH_COLLECTIONS, TAFSIR_COLLECTIONS, TAFSIR_LANGS, find_explicit_refs, parse_ref
+from app.refs import HADITH_COLLECTIONS, TAFSIR_COLLECTIONS, TAFSIR_LANGS, find_explicit_refs, find_quran_mentions, parse_ref, quran_ref
 from app.store import Passage, Store
 from app.text import detect_lang, strip_footnotes
 
@@ -186,6 +186,22 @@ class Retriever:
                 out += self.store.refs_by_alt_number("muslim", ref.partition(":")[2])
             if self.store.ref_exists(ref):
                 out.append(ref)
+        return list(dict.fromkeys(out))
+
+    def missing_refs(self, query: str) -> list[str]:
+        """Quran verses and hadith the user typed that aren't in the corpus ("quran:2:999", "quran:115:1",
+        "bukhari:99999"). A model asked about a reference that doesn't exist tends to answer anyway, so the
+        server refuses first."""
+        out = [quran_ref(s, a) for s, a in find_quran_mentions(query)
+               if not (1 <= s <= 114 and self.store.ref_exists(quran_ref(s, a)))]
+        found = set(self.explicit_refs(query))
+        for ref in find_explicit_refs(query):
+            collection = ref.partition(":")[0]
+            if collection == "quran" or collection in TAFSIR_COLLECTIONS or ref in found:
+                continue
+            if ref.startswith("muslim:") and self.store.refs_by_alt_number("muslim", ref.partition(":")[2]):
+                continue
+            out.append(ref)
         return list(dict.fromkeys(out))
 
     def relevance(self, query: str, refs: list[str]) -> dict[str, float]:

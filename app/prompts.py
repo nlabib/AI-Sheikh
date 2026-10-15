@@ -38,6 +38,15 @@ NO_SOURCES = {
     "ar": "لم أجد شيئًا عن هذا في القرآن أو في كتب الحديث الستة التي أبحث فيها، وأنا لا أجيب إلا منها، فلن أخمّن.",
 }
 
+# When the user names a verse or hadith number that isn't in the corpus. {ref} is the label of the reference.
+NO_SUCH_REF = {
+    "en": "I couldn't find {ref} in my sources, so I can't tell you what it says and I won't guess. "
+          "Please check the number, or ask a qualified scholar.",
+    "bn": "আমার উৎসগুলোতে {ref} খুঁজে পাইনি, তাই এতে কী আছে বলতে পারছি না এবং অনুমানও করব না। "
+          "অনুগ্রহ করে নম্বরটি যাচাই করুন, অথবা একজন যোগ্য আলেমকে জিজ্ঞাসা করুন।",
+    "ar": "لم أجد {ref} في مصادري، فلا أستطيع أن أخبرك بما فيه ولن أخمّن. يرجى التأكد من الرقم أو سؤال عالم مختص.",
+}
+
 INTRO = {
     "en": "I answer questions from the Quran and the six major hadith collections (Bukhari, Muslim, Abu Dawud, "
           "Tirmidhi, Nasa'i and Ibn Majah). I quote the passages I find and cite each one, and when they don't "
