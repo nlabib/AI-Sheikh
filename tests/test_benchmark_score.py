@@ -19,9 +19,5 @@ def test_no_citation_is_wrong():
     assert score(ITEM, resp("It is a verse.", []))["verdict"] == "wrong"
 
 
-def test_must_not_phrase_makes_it_wrong():
-    assert score(ITEM, resp("This is forbidden [quran:2:255]", ["quran:2:255"]))["verdict"] == "wrong"
-
-
 def test_refusal_is_refused():
     assert score(ITEM, resp("I'm not sure.", []))["verdict"] == "refused"

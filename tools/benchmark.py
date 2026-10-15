@@ -12,8 +12,8 @@ Scoring is automatic and deliberately strict about honesty; it cannot judge whet
                                    expected sources. Not necessarily bad (the cited passages are real and the
                                    quotes are exact); a person should read these. A hand check of the old
                                    "wrong" bucket found about half were fine.
-                         wrong   = shown with no citation at all, or the answer contains something the item
-                                   lists under must_not
+                         wrong   = shown with no citation at all (must_not entries describe wrong claims in
+                                   prose, so a person checks those; they are not matched automatically)
   trick questions        good    = said "I'm not sure", or corrected the user citing only acceptable sources
                          wrong   = an answer citing anything else (a made-up or misapplied source)
 
@@ -69,10 +69,6 @@ def score(item: dict, response: dict) -> dict:
         elif cited:
             verdict = "other"
         else:
-            verdict = "wrong"
-    if verdict in ("good", "other") and item["expected"] != "not_sure":
-        bad = [p for p in item.get("must_not", []) if normalize(p) in normalize(shown)]
-        if bad:
             verdict = "wrong"
     return {"verdict": verdict, "cited": sorted(cited), "replaced": "unverified_answer" in response,
             "mentions": mentions(raw, item.get("must_mention", [])), "status": (response.get("citation_check") or {}).get("status")}
